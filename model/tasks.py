@@ -17,6 +17,8 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+import shutil
+UV = shutil.which("uv") or str(Path.home() / ".local/bin/uv")
 
 ROOT = Path(__file__).parents[1]
 
@@ -39,6 +41,7 @@ class Task:
     params: dict = field(default_factory=dict)   # name: default value, or a tuple of choices (first = default)
     duration_s: float = 15 * 60
     start_line: str | None = None
+    project: Path | str | None = None # Optional venv path
     stop_grace_s: float = 5.0         # after a stop request, force-kill after this long
  
     def defaults(self) -> dict:
@@ -79,12 +82,17 @@ def view(image: Path | str, *options: str) -> tuple[str, ...]:
     return ("eog", "--new-instance", *options, str(image))
 
 
+
 FMRI_GYM_PATH="~/DBP/fmri-gym/"
 GOXPY_PATH = "~/DBP/goxpyriment/"
 EYETRACKER_PATH =  "~/DBP/eyelink-track/"
 
 GAME_TASKS: list[Task] = [
-    Task("baba_is_you", "Baba is you", Category.VIDEO_GAME, app(f"cd {FMRI_GYM_PATH} && source .venv/bin/activate && uv run fmri-play --dummy-trigger --subject sub-01 --ses 1 --run 1 --rig configs/examples/rigs/laptop.json --curriculum configs/curricula/baba_auto/levels/baba_is_you.json"),duration_s=120),
+    Task("baba_is_you", "Baba is you", Category.VIDEO_GAME,
+     app("fmri-play", "--dummy-trigger", "--subject", "{subject}", "--ses", "1", "--run", "1",
+         "--rig", "configs/examples/rigs/laptop.json",
+         "--curriculum", "configs/curricula/baba_auto/levels/baba_is_you.json"),
+     duration_s=120, project=FMRI_GYM_PATH),
     Task("out_of_reach", "Out of reach", Category.VIDEO_GAME, app(f"cd {FMRI_GYM_PATH} && source .venv/bin/activate && uv run fmri-play --dummy-trigger --subject sub-01 --ses 1 --run 1 --rig configs/examples/rigs/laptop.json --curriculum configs/curricula/baba_auto/levels/out_of_reach.json"),duration_s=120),
     Task("volcano", "Volcano", Category.VIDEO_GAME, app(f"cd {FMRI_GYM_PATH} && source .venv/bin/activate && uv run fmri-play --dummy-trigger --subject sub-01 --ses 1 --run 1 --rig configs/examples/rigs/laptop.json --curriculum configs/curricula/baba_auto/levels/volcano.json"),duration_s=120),
     

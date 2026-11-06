@@ -5,21 +5,15 @@
   "timeline_mode": "TOTAL_RECORDING_TIME",
   "runs": [
     {
-      "category": "COGNITIVE_TASK",
-      "task": "sudoku",
-      "duration_s": 30.0,
+      "category": "VIDEO_GAME",
+      "task": "chess",
+      "duration_s": 120.0,
       "parameters": {}
     },
     {
       "category": "VIDEO_GAME",
-      "task": "chess",
-      "duration_s": 10.0,
-      "parameters": {}
-    },
-    {
-      "category": "LOCALIZER_MRI",
-      "task": "checkerboard_mri",
-      "duration_s": 10.0,
+      "task": "baba_is_you",
+      "duration_s": 120.0,
       "parameters": {}
     }
   ]

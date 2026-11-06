@@ -12,6 +12,8 @@ import sys
 import threading
 from contextlib import suppress
 from pathlib import Path
+import shutil
+BIN = "Scripts" if sys.platform == "win32" else "bin"      # where a virtual env keeps its programs
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
@@ -43,6 +45,17 @@ else:
             os.killpg(proc.pid, signal.SIGKILL)
 
 
+def environment(project):
+    env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT", "PYTHONHOME")}
+    own = Path(sys.prefix, BIN) if sys.prefix != sys.base_prefix else None    # the scheduler's venv
+    path = [p for p in env.get("PATH", "").split(os.pathsep) if p and Path(p) != own]
+    venv = Path(project, ".venv") if project else None
+    if venv and venv.is_dir():
+        env["VIRTUAL_ENV"] = str(venv)
+        path.insert(0, str(venv / BIN))       # BIN is "bin" ("Scripts" on Windows)
+    env["PATH"] = os.pathsep.join(path)
+    return env
+
 class Launcher(QObject):
     launched = Signal()          # the task was launched (the actual startup within the task is up to scanner trigger)
     exited = Signal(object)     # exit code; None if it was never launched
@@ -58,10 +71,10 @@ class Launcher(QObject):
         self._cancel = threading.Event()
         self._kill_timer = QTimer(self, singleShot=True, timeout=self._force_kill)
 
-    def spawn(self, argv: list[str], outdir: Path, grace_s: float):
+    def spawn(self, argv: list[str], outdir: Path, grace_s: float, project: Path | None = None):
         self._kill_timer.stop()                         # a pending kill was for the previous task
         self._proc, self._cancel, self._grace_s = None, threading.Event(), grace_s
-        threading.Thread(target=self._run, args=(argv, Path(outdir), self._cancel), daemon=True).start()
+        threading.Thread(target=self._run, args=(argv, Path(outdir), project, self._cancel), daemon=True).start()
 
     def stop(self):
         """Ask the task to stop, force-kill it after its grace period. Its exit is reported as usual."""
@@ -74,14 +87,15 @@ class Launcher(QObject):
         if self._proc is not None and self._proc.poll() is None:
             force_kill(self._proc)
 
-    def _run(self, argv, outdir, cancel):  # worker thread: only emits signals
+    def _run(self, argv, outdir, project, cancel):  # worker thread: only emits signals
         if cancel.wait(SETTLE_S):
             return self._exited.emit(None)
         outdir.mkdir(parents=True, exist_ok=True)
         with open(outdir / "output.log", "wb") as log:
             try:
-                proc = subprocess.Popen(argv, cwd=outdir, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                        stderr=subprocess.STDOUT, **GROUP)
+                env = environment(project)
+                program = shutil.which(argv[0], path=env["PATH"]) or argv[0]     # look up fmri-play in that PATH
+                proc = subprocess.Popen([program, *argv[1:]], cwd=project or outdir, env=env, ...)
             except OSError as exc:
                 log.write(f"[scheduler] could not launch {argv[0]}: {exc}\n".encode())
                 return self._exited.emit(None)

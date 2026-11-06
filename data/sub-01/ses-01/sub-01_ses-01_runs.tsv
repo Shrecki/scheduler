@@ -1,4 +1,3 @@
 onset	duration	trial_type	run	category	acq_time	exit_code	parameters
-1.014	6.937	sudoku	run-01	COGNITIVE_TASK	2026-11-06T13:40:41.222368	0	n/a
-8.963	4.889	chess	run-02	VIDEO_GAME	2026-11-06T13:40:49.171368	0	n/a
-14.862	10.020	checkerboard_mri	run-03	LOCALIZER_MRI	2026-11-06T13:40:55.070368	124	n/a
+1.009	2.963	chess	run-01	VIDEO_GAME	2026-11-06T16:43:23.324670	0	n/a
+4.981	0.039	baba_is_you	run-02	VIDEO_GAME	2026-11-06T16:43:27.296670	2	n/a

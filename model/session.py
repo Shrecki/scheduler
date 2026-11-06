@@ -182,7 +182,7 @@ class Session:
         outdir = self.session_dir / "blocks" / f"{self.index + 1:02d}_{task.key}"
         argv = task.argv(block.params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
                          subject=self.subject, session=f"ses-{self.session_number:02d}")
-        self.processes.spawn(argv, outdir, task.stop_grace_s)
+        self.processes.spawn(argv, outdir, task.stop_grace_s, task.project)
 
     def mark_started(self):
         self.current.started_at = now_ms()
