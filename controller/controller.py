@@ -1,0 +1,49 @@
+"""
+Controller part of the MVC architecture
+Signals (from user, task processes and clocks) are turned into model calls.
+The responsibility of the controller (per MVC) is only to call model methods."""
+
+from PySide6.QtCore import QTimer
+
+
+class Controller:
+    TICK_MS = 200       # clock refresh, and how often the session time is checked
+
+    def __init__(self, sm, view, launcher):
+        self.sm, self.session, self.view = sm, sm.model, view
+        
+        # Here setup the callbacks
+        # Conceptually equivalent in Javascript as button.onclick(...) :)
+        view.modeToggled.connect(sm.change_mode)
+        view.startClicked.connect(sm.start)
+        view.skipClicked.connect(sm.skip)
+        view.stopClicked.connect(sm.end_session)
+        view.blockDropped.connect(self.session.add_block)
+        view.blockMoved.connect(self.session.move_block)
+        view.blockRemoved.connect(self.session.remove_block)
+        view.taskChosen.connect(self.session.set_task)
+        view.paramChanged.connect(self.session.set_param)
+        view.durationChanged.connect(self.session.set_duration)
+        view.loadDesign.connect(self.session.load_design)
+        view.saveDesign.connect(self.session.save_design)
+        launcher.launched.connect(sm.launched)
+        launcher.exited.connect(lambda code: sm.process_exited(exit_code=code))
+        self.timer = QTimer(interval=self.TICK_MS, timeout=self.tick)
+
+    def run(self) -> bool:
+        info = self.view.ask_session(self.session.data_root)
+        if info is None:
+            return False
+        self.session.subject, self.session.session_number = info.subject_name, info.session_number
+        self.sm.validate()
+        if info.previous:                       # session 02+: start from the previous session's design
+            self.session.load_design(info.previous)
+        self.view.show()
+        self.timer.start()
+        return True
+
+    def tick(self):
+        if self.session.in_state("recording"):
+            if self.session.time_is_up():
+                self.sm.end_session()           # ignored once the session is already ending
+            self.session.tick()

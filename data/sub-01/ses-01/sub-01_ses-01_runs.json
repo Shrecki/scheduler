@@ -1,0 +1,28 @@
+{
+  "onset": {
+    "Description": "Start of the run (its start line, e.g. the scanner trigger), from the start of the recording",
+    "Units": "s"
+  },
+  "duration": {
+    "Description": "How long the run played, until its task exited",
+    "Units": "s"
+  },
+  "trial_type": {
+    "Description": "Task key, as in the scheduler's tasks.py"
+  },
+  "run": {
+    "Description": "Position of the run in the session's timeline"
+  },
+  "category": {
+    "Description": "Category of the task"
+  },
+  "acq_time": {
+    "Description": "Wall-clock time (local) at which the run started"
+  },
+  "exit_code": {
+    "Description": "Exit code of the task; negative: stopped by that signal; n/a: could not be launched"
+  },
+  "parameters": {
+    "Description": "Task parameters used for the run (JSON)"
+  }
+}

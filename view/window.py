@@ -1,0 +1,138 @@
+"""The main window. It reads the session to draw itself (refresh), and reports what the user asks for
+as signals. It never changes the session or the state machine itself."""
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton, QVBoxLayout,
+                               QWidget)
+
+from model.session import TimelineMode
+from .blocks import Palette, fmt
+from .composition import Composition
+from .timeline import Timeline
+from .session_dialog import SessionDialog
+
+
+class MainWindow(QMainWindow):
+    modeToggled = Signal()
+    startClicked = Signal()
+    skipClicked = Signal()
+    stopClicked = Signal()
+    blockDropped = Signal(str, int)     # category name, insert before this index (-1: at the end)
+    blockMoved = Signal(int, int)
+    blockRemoved = Signal(int)
+    taskChosen = Signal(int, str)             # run index, task key
+    paramChanged = Signal(int, str, object)   # run index, parameter name, value
+    durationChanged = Signal(int, int)        # run index, ms
+    loadDesign = Signal(str)                  # file path
+    saveDesign = Signal(str)
+
+    def __init__(self, sm):
+        super().__init__(windowTitle="Block scheduler")
+        self.sm, self.session = sm, sm.model
+        self.resize(1200, 580)
+
+        self.identity, self.title = QLabel(objectName="hint"), QLabel(objectName="title")
+        self.clock = QLabel(objectName="title")
+        self.timeline, self.palette = Timeline(self.session), Palette()
+        self.composition = Composition(self.session)
+        self.message = QLabel(objectName="hint")
+        self.mode = QPushButton()
+        self.start = QPushButton("Start recording", objectName="primary")
+        self.skip = QPushButton("Skip block")
+        self.stop = QPushButton("Stop recording")
+        self.load, self.save = QPushButton("Load design…"), QPushButton("Save design…")
+        self.load.clicked.connect(lambda: self.ask_file(QFileDialog.getOpenFileName, self.loadDesign))
+        self.save.clicked.connect(lambda: self.ask_file(QFileDialog.getSaveFileName, self.saveDesign))
+        for button, signal in ((self.mode, self.modeToggled), (self.start, self.startClicked),
+                               (self.skip, self.skipClicked), (self.stop, self.stopClicked)):
+            button.clicked.connect(signal)
+        self.timeline.blockDropped.connect(self.blockDropped)
+        self.timeline.blockMoved.connect(self.blockMoved)
+        self.timeline.blockRemoved.connect(self.blockRemoved)
+        self.palette.add.connect(lambda name: self.blockDropped.emit(name, -1))
+        self.timeline.taskChosen.connect(self.taskChosen)
+        self.timeline.paramChanged.connect(self.paramChanged)
+        self.timeline.durationChanged.connect(self.durationChanged)
+
+        header = QFrame(objectName="bar")
+        titles = QVBoxLayout()
+        titles.addWidget(self.identity)
+        titles.addWidget(self.title)
+        top = QHBoxLayout(header)
+        top.addLayout(titles, 1)
+        top.addWidget(self.clock)
+        column = QVBoxLayout()
+        column.addWidget(self.composition)
+        column.addWidget(self.timeline)
+        column.addWidget(self.timeline.controls, 0, Qt.AlignRight)
+        column.addStretch()
+        body = QHBoxLayout()
+        body.addLayout(column, 1)
+        body.addWidget(self.palette)
+        bottom = QHBoxLayout()
+        bottom.addWidget(self.message, 1)
+        for button in (self.load, self.save, self.mode, self.stop, self.skip, self.start):
+            bottom.addWidget(button)
+        central = QWidget()
+        page = QVBoxLayout(central)
+        page.addWidget(header)
+        page.addLayout(body, 1)
+        page.addLayout(bottom)
+        self.setCentralWidget(central)
+
+        self.session.observers.append(self.refresh)
+
+    def ask_file(self, dialog, signal):
+        path, _ = dialog(self, "Session design", str(self.session.data_root), "Session design (*.json)")
+        if path:
+            signal.emit(path if path.endswith(".json") else path + ".json")
+
+    def ask_session(self, data_root):
+        dialog = SessionDialog(data_root)
+        return dialog.info() if dialog.exec() else None
+
+    def refresh(self):
+        """Redraw everything from the session. Only reads: never changes the session."""
+        s, state, leaf = self.session, self.session.in_state, self.session.leaf_state
+        allowed = {event.id for event in self.sm.allowed_events}
+        if leaf in ("next_block_await", "block_running"):
+            waiting = ", waiting to start" if leaf == "next_block_await" else ""
+            title = f"run-{s.index + 1:02d}: {s.current.label}{waiting}"
+        else:
+            title = {"design": "Timeline design", "execute": "Ready to record", "quit_sequence": "Stopping",
+                     "finalize": "Session finished"}.get(leaf, "")
+        self.identity.setText(f"{s.subject}  /  ses-{s.session_number:02d}")
+        self.title.setText(title)
+
+        if s.rec_start is None:
+            shown = sum(b.duration_ms for b in s.blocks)    # planned
+        else:
+            shown = s.block_time_ms() if s.mode == TimelineMode.TOTAL_BLOCK_TIME else s.elapsed_ms()
+        self.clock.setText(f"{fmt(shown)} / {fmt(s.total_ms)}")
+
+        ended = [i for i, b in enumerate(s.blocks) if b.ended_at]
+        if not ended:
+            self.message.setText(s.notice if state("design") else "")
+        elif s.blocks[ended[-1]].exit_code is None:
+            self.message.setText(f"run-{ended[-1] + 1:02d} could not be launched: see its output.log")
+        else:
+            self.message.setText(f"run-{ended[-1] + 1:02d} exited (code {s.blocks[ended[-1]].exit_code})")
+
+        self.palette.setVisible(state("design"))
+        self.load.setVisible(state("design"))
+        self.save.setVisible(state("design"))
+        self.mode.setVisible(state("design") or state("execute"))
+        self.mode.setText("Back to design" if state("execute") else "Switch to execution")
+        self.start.setVisible(state("execute"))
+        self.start.setEnabled(s.has_blocks())
+        self.skip.setVisible(state("recording"))
+        self.skip.setEnabled("skip" in allowed)
+        self.stop.setVisible(state("recording"))
+        self.stop.setEnabled("end_session" in allowed)
+        self.composition.refresh()
+        self.timeline.refresh()
+
+    def closeEvent(self, event):
+        if self.session.in_state("recording"):
+            event.ignore()              # closing would abandon the running task
+            self.message.setText("Stop the recording before closing the window.")
