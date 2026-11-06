@@ -95,7 +95,9 @@ class Launcher(QObject):
             try:
                 env = environment(project)
                 program = shutil.which(argv[0], path=env["PATH"]) or argv[0]     # look up fmri-play in that PATH
-                proc = subprocess.Popen([program, *argv[1:]], cwd=project or outdir, env=env, ...)
+                proc = subprocess.Popen([program, *argv[1:]], cwd=project or outdir, env=env,
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, **GROUP)
             except OSError as exc:
                 log.write(f"[scheduler] could not launch {argv[0]}: {exc}\n".encode())
                 return self._exited.emit(None)

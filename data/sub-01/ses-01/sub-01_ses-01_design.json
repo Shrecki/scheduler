@@ -6,12 +6,6 @@
   "runs": [
     {
       "category": "VIDEO_GAME",
-      "task": "chess",
-      "duration_s": 120.0,
-      "parameters": {}
-    },
-    {
-      "category": "VIDEO_GAME",
       "task": "baba_is_you",
       "duration_s": 120.0,
       "parameters": {}

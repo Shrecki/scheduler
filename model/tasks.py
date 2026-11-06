@@ -83,7 +83,7 @@ def view(image: Path | str, *options: str) -> tuple[str, ...]:
 
 
 
-FMRI_GYM_PATH="~/DBP/fmri-gym/"
+FMRI_GYM_PATH="/home/guibertf/DBP/fmri-gym/"
 GOXPY_PATH = "~/DBP/goxpyriment/"
 EYETRACKER_PATH =  "~/DBP/eyelink-track/"
 
