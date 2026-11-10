@@ -11,7 +11,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 
-from .tasks import Category, get_task, tasks_for
+from .task_definitions import get_task, tasks_for
+from .tasks import Category
 
 MIN = 60_000
 
@@ -46,8 +47,9 @@ class Block:
 
 
 class Session:
-    def __init__(self, processes):
-        self.processes = processes      # the launcher: spawn(argv, outdir, start_line, grace_s) / stop()
+    def __init__(self, processes, scripts=None):
+        self.processes = processes      # the launcher: spawn(argv, outdir, grace_s, project) / stop()
+        self.scripts = scripts          # a session-script format: write(session) -> text, read(text) -> design, note
         self.observers = []             # callables, called by notify()
         self.state = None               # written by the state machine
         self.subject, self.session_number = "sub-01", 1
@@ -176,12 +178,19 @@ class Session:
         return [(c, ms) for c, ms in totals.items() if ms]
 
     # --- actions, called by the state machine --------------------------------------------------------
+    def command(self, index: int) -> tuple[list[str], Path]:
+        """What run `index` executes: its command line, and its output folder."""
+        block, task = self.blocks[index], get_task(self.blocks[index].task)
+        outdir = (self.session_dir / "blocks" / f"{index + 1:02d}_{task.key}").absolute()  # tasks run elsewhere
+        argv = task.argv(block.params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
+                         subject=self.subject, session=f"ses-{self.session_number:02d}",
+                         before=self.blocks[:index])
+        return argv, outdir
+
     def launch_next(self):
         self.index += 1
-        block, task = self.current, get_task(self.current.task)
-        outdir = self.session_dir / "blocks" / f"{self.index + 1:02d}_{task.key}"
-        argv = task.argv(block.params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
-                         subject=self.subject, session=f"ses-{self.session_number:02d}")
+        argv, outdir = self.command(self.index)
+        task = get_task(self.current.task)
         self.processes.spawn(argv, outdir, task.stop_grace_s, task.project)
 
     def mark_started(self):
@@ -214,11 +223,33 @@ class Session:
             self.notice = f"Could not save {Path(path).name}: {exc}"
         self.notify()
 
-    def load_design(self, source: str | Path | dict):
+    def save_script(self, path: str | Path):
+        """The design as a session script, in the format given to the session (`scripts`)."""
+        try:
+            write(path, self.scripts.write(self))
+            Path(path).chmod(0o755)
+            self.notice = f"Exported {Path(path).name}"
+        except OSError as exc:
+            self.notice = f"Could not export {Path(path).name}: {exc}"
+        self.notify()
+
+    def load_script(self, path: str | Path):
+        """Replace the runs with those of a session script, in the format given to the session."""
+        try:
+            design, note = self.scripts.read(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            self.notice = f"Could not load {Path(path).name}: {exc}"
+            return self.notify()
+        self.load_design(design, Path(path).name)
+        if note and self.notice.startswith("Loaded"):
+            self.notice += f" ({note})"
+            self.notify()
+
+    def load_design(self, source: str | Path | dict, name: str | None = None):
         """Replace the runs with a saved design (a file path, or its parsed content)."""
         if not self.in_state("design"):
             return
-        name = "the previous session's design" if isinstance(source, dict) else Path(source).name
+        name = name or ("the previous session's design" if isinstance(source, dict) else Path(source).name)
         try:
             design = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
             blocks = []
@@ -260,7 +291,7 @@ class Session:
 
 
 RUNS_SIDECAR = {   # BIDS: describes the columns of the runs table
-    "onset": {"Description": "Start of the run (its start line, e.g. the scanner trigger), from the start of the recording",
+    "onset": {"Description": "Launch of the run's task, from the start of the recording",
               "Units": "s"},
     "duration": {"Description": "How long the run played, until its task exited", "Units": "s"},
     "trial_type": {"Description": "Task key, as in the scheduler's tasks.py"},

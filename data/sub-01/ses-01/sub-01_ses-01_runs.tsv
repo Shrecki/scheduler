@@ -1,2 +1,3 @@
 onset	duration	trial_type	run	category	acq_time	exit_code	parameters
-1.013	21.699	baba_is_you	run-01	VIDEO_GAME	2026-11-06T17:06:57.704055	-9	n/a
+1.047	37.442	sudoku	run-01	COGNITIVE_TASK	2026-11-06T17:13:39.820462	0	n/a
+39.503	64.141	baba_is_you	run-02	VIDEO_GAME	2026-11-06T17:14:18.276462	-9	n/a

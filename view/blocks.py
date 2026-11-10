@@ -8,7 +8,8 @@ from PySide6.QtCore import QByteArray, QMimeData, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QDrag, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QVBoxLayout, QWidget
 
-from model.tasks import Category, tasks_for
+from model.task_definitions import tasks_for
+from model.tasks import Category
 from .theme import CATEGORY_COLORS, color
 
 MIME = "application/x-scheduler-block"

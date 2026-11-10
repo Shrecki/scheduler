@@ -1,7 +1,5 @@
-"""
-Controller part of the MVC architecture
-Signals (from user, task processes and clocks) are turned into model calls.
-The responsibility of the controller (per MVC) is only to call model methods."""
+"""Turns everything that comes from outside (the user, the task processes, the clock) into calls on
+the model: state-machine events, or the model's update methods. It never updates the view."""
 
 from PySide6.QtCore import QTimer
 
@@ -11,9 +9,6 @@ class Controller:
 
     def __init__(self, sm, view, launcher):
         self.sm, self.session, self.view = sm, sm.model, view
-        
-        # Here setup the callbacks
-        # Conceptually equivalent in Javascript as button.onclick(...) :)
         view.modeToggled.connect(sm.change_mode)
         view.startClicked.connect(sm.start)
         view.skipClicked.connect(sm.skip)
@@ -26,6 +21,8 @@ class Controller:
         view.durationChanged.connect(self.session.set_duration)
         view.loadDesign.connect(self.session.load_design)
         view.saveDesign.connect(self.session.save_design)
+        view.exportScript.connect(self.session.save_script)
+        view.importScript.connect(self.session.load_script)
         launcher.launched.connect(sm.launched)
         launcher.exited.connect(lambda code: sm.process_exited(exit_code=code))
         self.timer = QTimer(interval=self.TICK_MS, timeout=self.tick)

@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
                                QLineEdit, QMenu, QPushButton, QScrollArea, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
-from model.tasks import get_task, tasks_for
+from model.task_definitions import get_task, tasks_for
 from .blocks import MIME, DragSource, fmt
 from .theme import CATEGORY_COLORS, color
 

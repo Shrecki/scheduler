@@ -25,6 +25,8 @@ class MainWindow(QMainWindow):
     durationChanged = Signal(int, int)        # run index, ms
     loadDesign = Signal(str)                  # file path
     saveDesign = Signal(str)
+    exportScript = Signal(str)
+    importScript = Signal(str)
 
     def __init__(self, sm):
         super().__init__(windowTitle="Block scheduler")
@@ -43,6 +45,11 @@ class MainWindow(QMainWindow):
         self.load, self.save = QPushButton("Load design…"), QPushButton("Save design…")
         self.load.clicked.connect(lambda: self.ask_file(QFileDialog.getOpenFileName, self.loadDesign))
         self.save.clicked.connect(lambda: self.ask_file(QFileDialog.getSaveFileName, self.saveDesign))
+        self.export, self.import_ = QPushButton("Export script…"), QPushButton("Import script…")
+        self.export.clicked.connect(lambda: self.ask_file(QFileDialog.getSaveFileName, self.exportScript,
+                                                          "Session script", ".sh"))
+        self.import_.clicked.connect(lambda: self.ask_file(QFileDialog.getOpenFileName, self.importScript,
+                                                           "Session script", ".sh"))
         for button, signal in ((self.mode, self.modeToggled), (self.start, self.startClicked),
                                (self.skip, self.skipClicked), (self.stop, self.stopClicked)):
             button.clicked.connect(signal)
@@ -71,7 +78,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self.palette)
         bottom = QHBoxLayout()
         bottom.addWidget(self.message, 1)
-        for button in (self.load, self.save, self.mode, self.stop, self.skip, self.start):
+        for button in (self.load, self.save, self.import_, self.export, self.mode, self.stop, self.skip, self.start):
             bottom.addWidget(button)
         central = QWidget()
         page = QVBoxLayout(central)
@@ -82,10 +89,10 @@ class MainWindow(QMainWindow):
 
         self.session.observers.append(self.refresh)
 
-    def ask_file(self, dialog, signal):
-        path, _ = dialog(self, "Session design", str(self.session.data_root), "Session design (*.json)")
+    def ask_file(self, dialog, signal, kind="Session design", suffix=".json"):
+        path, _ = dialog(self, kind, str(self.session.data_root), f"{kind} (*{suffix})")
         if path:
-            signal.emit(path if path.endswith(".json") else path + ".json")
+            signal.emit(path if path.endswith(suffix) else path + suffix)
 
     def ask_session(self, data_root):
         dialog = SessionDialog(data_root)
@@ -96,7 +103,7 @@ class MainWindow(QMainWindow):
         s, state, leaf = self.session, self.session.in_state, self.session.leaf_state
         allowed = {event.id for event in self.sm.allowed_events}
         if leaf in ("next_block_await", "block_running"):
-            waiting = ", waiting to start" if leaf == "next_block_await" else ""
+            waiting = ", launching" if leaf == "next_block_await" else ""
             title = f"run-{s.index + 1:02d}: {s.current.label}{waiting}"
         else:
             title = {"design": "Timeline design", "execute": "Ready to record", "quit_sequence": "Stopping",
@@ -121,6 +128,8 @@ class MainWindow(QMainWindow):
         self.palette.setVisible(state("design"))
         self.load.setVisible(state("design"))
         self.save.setVisible(state("design"))
+        self.export.setVisible(state("design") and s.scripts is not None)
+        self.import_.setVisible(state("design") and s.scripts is not None)
         self.mode.setVisible(state("design") or state("execute"))
         self.mode.setText("Back to design" if state("execute") else "Switch to execution")
         self.start.setVisible(state("execute"))
