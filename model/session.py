@@ -32,8 +32,8 @@ class Block:
     category: Category
     duration_ms: int
     params: dict = field(default_factory=dict)
-    started_at: int | None = None      # facts recorded during the session
-    ended_at: int | None = None
+    started_at: int | None = None      # its play on the timeline (the first that started): replays
+    ended_at: int | None = None        # do not move the timeline back, they are only in `plays`
     exit_code: int | None = None
 
     @property
@@ -44,6 +44,19 @@ class Block:
         if self.started_at is None:
             return 0
         return (self.ended_at or now) - self.started_at
+
+
+@dataclass
+class Play:
+    """One launch of a run. A run played again (clicked, autoplay off) is a second Play of its block."""
+    index: int                         # which block
+    params: dict                       # as they were when it was launched
+    started_at: int | None = None
+    ended_at: int | None = None
+    exit_code: int | None = None
+
+    def played_ms(self, now: int) -> int:
+        return 0 if self.started_at is None else (self.ended_at or now) - self.started_at
 
 
 class Session:
@@ -58,7 +71,11 @@ class Session:
         self.mode = TimelineMode.TOTAL_RECORDING_TIME
         self.max_block_ms = 15 * MIN
         self.blocks: list[Block] = []
-        self.index = -1                 # current block
+        self.index = -1                 # the block playing, or played last
+        self.farthest = -1              # the farthest block played: the timeline's progress
+        self.queued: int | None = None  # the block to play next, if clicked (None: the one after `farthest`)
+        self.autoplay = True            # play the blocks one after the other; off: each when clicked
+        self.plays: list[Play] = []     # every launch, replays included
         self.rec_start = self.rec_end = None
         self.rec_start_wall: datetime | None = None   # wall clock at rec_start, for acq_time
         self.notice = ""                # short message for the operator (e.g. a design that failed to load)
@@ -99,9 +116,13 @@ class Session:
             self.notify()
 
     def editable(self, index: int) -> bool:
-        """A run's task, duration and parameters can be changed in design, and while recording as long
-        as the run has not started (e.g. by an adaptive algorithm). Adding/moving/removing: design only."""
-        return self.in_state("design") or (self.in_state("recording") and index > self.index)
+        """A run's task, duration and parameters can be changed in design, and while recording unless
+        it is the run playing (e.g. by an adaptive algorithm). Adding/moving/removing: design only."""
+        return self.in_state("design") or (self.in_state("recording") and not (self.playing() and index == self.index))
+
+    def set_autoplay(self, on: bool):
+        self.autoplay = on
+        self.notify()
 
     def set_task(self, index: int, key: str):
         if self.editable(index):
@@ -139,7 +160,7 @@ class Session:
         return self.now() - self.rec_start if self.rec_start else 0
 
     def block_time_ms(self) -> int:
-        return sum(b.played_ms(self.now()) for b in self.blocks)
+        return sum(p.played_ms(self.now()) for p in self.plays)
 
     def remaining_ms(self) -> int:
         used = self.block_time_ms() if self.mode == TimelineMode.TOTAL_BLOCK_TIME else self.elapsed_ms()
@@ -152,20 +173,31 @@ class Session:
         return bool(self.blocks)
 
     def can_continue(self) -> bool:
-        return self.index + 1 < len(self.blocks) and not self.time_is_up()
+        """There is a block after the farthest played, and time left to play it."""
+        return self.farthest + 1 < len(self.blocks) and not self.time_is_up()
+
+    def playable(self, index: int) -> bool:
+        return 0 <= index < len(self.blocks) and not self.time_is_up()
+
+    def playing(self) -> bool:
+        """A block's task is launching, running or stopping."""
+        return any(self.in_state(s) for s in ("next_block_await", "block_running", "quit_sequence"))
+
+    def times_played(self, index: int) -> int:
+        return sum(p.index == index for p in self.plays)
 
     def timeline(self) -> tuple[list[tuple[Block, int, int]], int, int | None]:
         """Blocks laid end to end: (block, start, length) in ms, plus the end line and the playhead.
 
         Every block keeps its planned length (longer if it ran over). The playhead moves through
-        the current block; the end line sits at playhead + remaining session time, so blocks past
-        it are the ones that will be cut.
+        the farthest block played (playing an earlier one again does not move it back); the end line
+        sits at playhead + remaining session time, so blocks past it are the ones that will be cut.
         """
         items, x, now, playhead = [], 0, self.now(), None
         for i, b in enumerate(self.blocks):
             length = max(b.duration_ms, b.played_ms(now))
             items.append((b, x, length))
-            if i == self.index:
+            if i == self.farthest:
                 playhead = x + (length if b.ended_at else b.played_ms(now))
             x += length
         end = self.total_ms if playhead is None else playhead + max(self.remaining_ms(), 0)
@@ -181,27 +213,39 @@ class Session:
     def command(self, index: int) -> tuple[list[str], Path]:
         """What run `index` executes: its command line, and its output folder."""
         block, task = self.blocks[index], get_task(self.blocks[index].task)
-        outdir = (self.session_dir / "blocks" / f"{index + 1:02d}_{task.key}").absolute()  # tasks run elsewhere
+        again = f"_{n}" if (n := self.times_played(index)) > 1 else ""         # a run played again: its own folder
+        outdir = (self.session_dir / "blocks" / f"{index + 1:02d}_{task.key}{again}").absolute()  # tasks run elsewhere
         argv = task.argv(block.params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
                          subject=self.subject, session=f"ses-{self.session_number:02d}",
                          before=self.blocks[:index])
         return argv, outdir
 
+    def queue(self, index: int):
+        self.queued = index
+
     def launch_next(self):
-        self.index += 1
-        argv, outdir = self.command(self.index)
+        """Launch the block clicked, or else the one after the farthest played."""
+        index = self.farthest + 1 if self.queued is None else self.queued
+        self.index, self.farthest, self.queued = index, max(self.farthest, index), None
+        self.plays.append(Play(index, dict(self.current.params)))
+        argv, outdir = self.command(index)
         task = get_task(self.current.task)
         self.processes.spawn(argv, outdir, task.stop_grace_s, task.project)
 
     def mark_started(self):
-        self.current.started_at = now_ms()
+        block, self.plays[-1].started_at = self.current, now_ms()
+        if block.started_at is None:                    # its first play that starts: the timeline's
+            block.started_at, block.ended_at, block.exit_code = self.plays[-1].started_at, None, None
 
     def start_recording(self):
         self.rec_start, self.rec_start_wall = now_ms(), datetime.now()
         self.save_records()
 
     def mark_exited(self, exit_code):
-        self.current.ended_at, self.current.exit_code = now_ms(), exit_code
+        play, block = self.plays[-1], self.current
+        play.ended_at, play.exit_code = now_ms(), exit_code
+        if block.ended_at is None:
+            block.ended_at, block.exit_code = play.ended_at, exit_code
         self.save_records()
 
     # --- files ------------------------------------------------------------------------------------------
@@ -272,20 +316,22 @@ class Session:
         """The session's own files, rewritten at the start and after each run:
         - its design, as actually run (upcoming runs can still be edited while recording);
         - when each run started and stopped, as a BIDS-style table (tab-separated, n/a when missing):
-          onsets and durations in seconds from the start of the recording; one row per run that started."""
+          onsets and durations in seconds from the start of the recording; one row per play that started
+          (a run played again has a row for each time)."""
         design = self.design(subject_name=self.subject, session_number=self.session_number)
         write(f"{self.prefix}_design.json", json.dumps(design, indent=2))
         rows = ["onset\tduration\ttrial_type\trun\tcategory\tacq_time\texit_code\tparameters"]
-        for i, b in enumerate(self.blocks):
-            if b.started_at is None:
+        for p in self.plays:
+            if p.started_at is None:
                 continue
-            acq_time = self.rec_start_wall + timedelta(milliseconds=b.started_at - self.rec_start)
-            rows.append("\t".join([f"{(b.started_at - self.rec_start) / 1000:.3f}",
-                                   f"{b.played_ms(self.now()) / 1000:.3f}" if b.ended_at else "n/a",
-                                   b.task, f"run-{i + 1:02d}", b.category.name,
+            b = self.blocks[p.index]
+            acq_time = self.rec_start_wall + timedelta(milliseconds=p.started_at - self.rec_start)
+            rows.append("\t".join([f"{(p.started_at - self.rec_start) / 1000:.3f}",
+                                   f"{p.played_ms(self.now()) / 1000:.3f}" if p.ended_at else "n/a",
+                                   b.task, f"run-{p.index + 1:02d}", b.category.name,
                                    acq_time.isoformat(timespec="microseconds"),
-                                   "n/a" if b.exit_code is None else str(b.exit_code),
-                                   json.dumps(b.params) if b.params else "n/a"]))
+                                   "n/a" if p.exit_code is None else str(p.exit_code),
+                                   json.dumps(p.params) if p.params else "n/a"]))
         write(f"{self.prefix}_runs.tsv", "\n".join(rows) + "\n")
         write(f"{self.prefix}_runs.json", json.dumps(RUNS_SIDECAR, indent=2))
 
@@ -294,8 +340,8 @@ RUNS_SIDECAR = {   # BIDS: describes the columns of the runs table
     "onset": {"Description": "Launch of the run's task, from the start of the recording",
               "Units": "s"},
     "duration": {"Description": "How long the run played, until its task exited", "Units": "s"},
-    "trial_type": {"Description": "Task key, as in the scheduler's tasks.py"},
-    "run": {"Description": "Position of the run in the session's timeline"},
+    "trial_type": {"Description": "Task key, as in the scheduler's task_definitions.py"},
+    "run": {"Description": "Position of the run in the session's timeline (a run played again has a row each time)"},
     "category": {"Description": "Category of the task"},
     "acq_time": {"Description": "Wall-clock time (local) at which the run started"},
     "exit_code": {"Description": "Exit code of the task; negative: stopped by that signal; n/a: could not be launched"},

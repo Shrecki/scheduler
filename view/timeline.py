@@ -1,9 +1,12 @@
 """The timeline: one rectangle per run, to scale, scrolling horizontally. Each run is a widget holding
 its task, duration and parameter inputs; a see-through layer on top draws the grey of played time,
 the playhead, the end line and the drop marker. Emits what the user asks for; never edits the session.
+
+Zoomed out, a run too narrow for its inputs is shown in full beside it while the pointer rests on it,
+and a click on it in design opens it there to edit (RunPopup).
 """
 
-from PySide6.QtCore import QEvent, QLineF, QRectF, QTime, Qt, Signal
+from PySide6.QtCore import QEvent, QLineF, QPoint, QRectF, QTime, Qt, Signal
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QShortcut
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
                                QLineEdit, QMenu, QPushButton, QScrollArea, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
@@ -14,6 +17,7 @@ from .theme import CATEGORY_COLORS, color
 
 MIN_W, MAX_PX_PER_MS = 300, 300 / 30_000   # shortest run gets 300 px (runs under 30 s get less)
 PAD, TOP, CARD_H, GAP = 16, 14, 272, 4
+INPUTS_W = MIN_W - 2 * GAP - 16             # a run's inputs keep this width; narrower runs cut them off
 ZOOM_STEP, MAX_ZOOM = 2.0, 4.0              # per click (a wheel notch: its square root); up to 4x the default
 ZERO = QTime(0, 0)
 
@@ -46,12 +50,30 @@ def param_editor(value, choices: tuple | None, changed) -> QWidget:
     return widget
 
 
+def show_value(widget: QWidget, value, choices: tuple | None = None):
+    """Set an input made by param_editor (or a duration) to `value`, without it reporting a change."""
+    widget.blockSignals(True)
+    if isinstance(widget, QComboBox):
+        widget.setCurrentIndex(choices.index(value) if value in choices else 0)
+    elif isinstance(widget, QCheckBox):
+        widget.setChecked(value)
+    elif isinstance(widget, QTimeEdit):
+        widget.setTime(value)
+    elif isinstance(widget, QLineEdit):
+        widget.setText(str(value))
+    else:
+        widget.setValue(value)
+    widget.blockSignals(False)
+
+
 class RunCard(DragSource):
-    """One run: header (name, category, progress) and its inputs. Drag it by the header to move it."""
+    """One run: header (name, category, progress) and its inputs. Drag it by the header to move it.
+    The same card, outside the timeline, is what a RunPopup shows."""
 
     def __init__(self, index: int, block, max_ms: int, timeline: "Timeline", parent: QWidget):
         super().__init__(parent)
-        self.index, self.timeline = index, timeline
+        self.index, self.block, self.timeline = index, block, timeline
+        self.inline = parent is timeline.content       # on the timeline, not in a popup
         fill, ink = CATEGORY_COLORS[block.category.name]
         self.setObjectName("card")
         self.setAttribute(Qt.WA_StyledBackground)
@@ -70,35 +92,124 @@ class RunCard(DragSource):
         task_box.addItems([t.label for t in tasks])
         task_box.setCurrentIndex([t.key for t in tasks].index(block.task))
         task_box.currentIndexChanged.connect(lambda i: timeline.taskChosen.emit(index, tasks[i].key))
-        duration = QTimeEdit(displayFormat="mm:ss" if max_ms < 3_600_000 else "h:mm:ss")
+        self.duration = duration = QTimeEdit(displayFormat="mm:ss" if max_ms < 3_600_000 else "h:mm:ss")
         duration.setTimeRange(QTime(0, 0, 1), ZERO.addMSecs(max_ms))
         duration.setTime(ZERO.addMSecs(block.duration_ms))
         duration.timeChanged.connect(lambda t: timeline.durationChanged.emit(index, ZERO.msecsTo(t)))
 
-        inputs = QWidget()
-        inputs.setFixedWidth(MIN_W - 2 * GAP - 16)     # inputs stay compact in long runs
-        form = QFormLayout(inputs)
+        self.inputs = QWidget()
+        self.inputs.setFixedWidth(INPUTS_W)             # inputs stay compact in long runs
+        form = QFormLayout(self.inputs)
         form.setContentsMargins(0, 0, 0, 0)
         form.addRow("Task", task_box)
         form.addRow("Duration", duration)
         task = get_task(block.task)
+        self.editors = {}                               # parameter name: (input, choices), for sync()
         for name, value in block.params.items():
-            form.addRow(name, param_editor(value, task.choices(name), lambda v, name=name: emit(index, name, v)))
+            editor = param_editor(value, task.choices(name), lambda v, name=name: emit(index, name, v))
+            form.addRow(name, editor)
+            self.editors[name] = (editor, task.choices(name))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(header)
-        layout.addWidget(inputs)
+        layout.addWidget(self.inputs)
         layout.addStretch()
 
+    def sync(self, block):
+        """Show the run's current values: it may have been edited elsewhere (on the timeline or in its
+        popup). The input being typed into is left alone."""
+        shown = [(self.duration, ZERO.addMSecs(block.duration_ms), None)]
+        shown += [(widget, block.params[name], choices) for name, (widget, choices) in self.editors.items()]
+        for widget, value, choices in shown:
+            if not widget.hasFocus():
+                show_value(widget, value, choices)
+
+    def cut_off(self) -> bool:
+        """Too narrow for its inputs (zoomed out)."""
+        return self.width() < INPUTS_W + 8
+
+    def event(self, event):
+        """Hovered while cut off: shown in full beside it, instead of a one-line tooltip."""
+        if event.type() == QEvent.ToolTip and self.inline and self.cut_off():
+            self.timeline.show_run(self.index, editing=False)
+            return True
+        return super().event(event)
+
+    def leaveEvent(self, event):
+        if self.inline:
+            self.timeline.hide_preview()
+
     def drag_payload(self, pos):
-        return (f"move:{self.index}", QRectF(self.rect())) if self.timeline.session.in_state("design") else (None, None)
+        movable = self.inline and self.timeline.session.in_state("design")
+        return (f"move:{self.index}", QRectF(self.rect())) if movable else (None, None)
+
+    def mousePressEvent(self, event):
+        if self.inline:
+            self.timeline.hide_preview()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """A click (not a drag): while no run plays, play this one; in design, edit it in full if it is cut off."""
+        s = self.timeline.session
+        if self.press is not None and self.inline:
+            if s.in_state("idle"):
+                self.timeline.playRequested.emit(self.index)
+            elif s.in_state("design") and self.cut_off():
+                self.timeline.show_run(self.index, editing=True)
+        self.press = None
 
     def contextMenuEvent(self, event):
-        if self.timeline.session.in_state("design"):
+        if self.inline and self.timeline.session.in_state("design"):
             menu = QMenu(self)
             remove = menu.addAction(f"Remove run-{self.index + 1:02d}")
             if menu.exec(event.globalPos()) is remove:
                 self.timeline.blockRemoved.emit(self.index)
+
+
+class RunPopup(QFrame):
+    """A run shown in full beside its card: as a tooltip while the pointer rests on the card, or, after a
+    click in design, to edit it (Esc or a click elsewhere closes it). Its inputs emit the timeline's signals."""
+
+    def __init__(self, timeline: "Timeline", index: int, editing: bool):
+        super().__init__(timeline, Qt.Popup if editing else Qt.ToolTip | Qt.WindowTransparentForInput)
+        self.timeline, self.index, self.editing, self.card = timeline, index, editing, None
+        self.setObjectName("popup")
+        self.setStyleSheet(f"QFrame#popup {{ background: {color('surface').name()}; "
+                           f"border: 1px solid {color('border').name()}; }}")
+        self.hint = QLabel(objectName="hint")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.addWidget(self.hint)
+
+    def update_run(self, s, now: int):
+        block = s.blocks[self.index]
+        new = self.card is None or self.card.block is not block     # first shown, or given another task
+        if new:
+            if self.card is not None:
+                self.card.hide()
+                self.card.deleteLater()
+            self.card = RunCard(self.index, block, s.max_block_ms, self.timeline, self)
+            inputs = self.card.inputs                  # wide enough for long values, as tall as they need
+            inputs.setFixedWidth(min(max(inputs.sizeHint().width(), INPUTS_W), 2 * INPUTS_W))
+            self.layout().insertWidget(0, self.card)
+        self.card.setEnabled(s.editable(self.index))
+        self.card.status.setText(status(s, self.index, now))
+        self.card.sync(block)
+        self.hint.setText("Esc or a click elsewhere closes this" if self.editing else
+                          "Click the run to edit it" if s.in_state("design") else
+                          "Click the run to play it" if s.in_state("idle") else "")
+        self.hint.setVisible(bool(self.hint.text()))
+        if new or not self.editing:                 # an editor stays put while its run changes size
+            self.place(self.timeline.cards[self.index])
+
+    def place(self, card: QWidget):
+        """Above the card (below it if there is no room), centred on it, within the screen."""
+        self.adjustSize()
+        corner, area = card.mapToGlobal(QPoint(0, 0)), card.screen().availableGeometry()
+        x = min(max(corner.x() + (card.width() - self.width()) // 2, area.left()), area.right() - self.width())
+        y = corner.y() - self.height() - 6
+        y = y if y >= area.top() else corner.y() + card.height() + 6
+        self.move(x, max(min(y, area.bottom() - self.height()), area.top()))
 
 
 class Overlay(QWidget):
@@ -148,12 +259,17 @@ class Content(QWidget):
         self.timeline.drop(event)
 
 
-def status(block, now: int, waiting: bool) -> str:
-    if block.ended_at:
-        return f"played {fmt(block.played_ms(now))}" if block.started_at else "not started"
-    if block.started_at:
-        return f"{fmt(block.played_ms(now))} of {fmt(block.duration_ms)}"
-    return "waiting to start" if waiting else ""
+def status(s, i: int, now: int) -> str:
+    """A run's progress: the play under way, else how it played on the timeline (and how often)."""
+    block, times = s.blocks[i], s.times_played(i)
+    again = " (again)" if times > 1 else ""
+    if i == s.index and s.playing():
+        play = s.plays[-1]
+        return ("launching" if play.started_at is None else f"{fmt(play.played_ms(now))} of {fmt(block.duration_ms)}") + again
+    if not block.ended_at:
+        return ""
+    text = f"played {fmt(block.played_ms(now))}" if block.started_at else "not started"
+    return text + (f", {times}×" if times > 1 else "")
 
 
 class Timeline(QScrollArea):
@@ -163,11 +279,12 @@ class Timeline(QScrollArea):
     taskChosen = Signal(int, str)       # run index, task key
     paramChanged = Signal(int, str, object)   # run index, parameter name, value
     durationChanged = Signal(int, int)  # run index, ms
+    playRequested = Signal(int)         # a run clicked while none plays
 
     def __init__(self, session):
         super().__init__(widgetResizable=False, frameShape=QFrame.NoFrame)
         self.session, self.shown, self.cards, self.rects = session, [], [], []
-        self.caret = self.followed = None
+        self.caret = self.followed = self.popup = None
         self.content = Content(self)
         self.overlay = Overlay(self.content)
         self.setWidget(self.content)
@@ -225,23 +342,28 @@ class Timeline(QScrollArea):
         self.zoom_reset.setEnabled(abs(self.zoom - 1) > 1e-3)
         self.content.setFixedSize(int(2 * PAD + axis * k), TOP + CARD_H + 2 * PAD)
         self.overlay.setGeometry(self.content.rect())
-        now = s.now()
+        now, idle, design = s.now(), s.in_state("idle"), s.in_state("design")
         rects, veils = [], []
         for i, ((b, x, n), card) in enumerate(zip(items, self.cards)):
             rect = QRectF(PAD + x * k, TOP, max(n * k - GAP, 8), CARD_H)
             card.setGeometry(rect.toRect())
             card.setEnabled(s.editable(i))
-            card.setToolTip(f"run-{i + 1:02d}: {b.label}, {fmt(b.duration_ms)}")   # readable when zoomed out
+            cut = card.cut_off()
+            card.inputs.setAttribute(Qt.WA_TransparentForMouseEvents, cut)   # pointer and clicks go to the run
+            card.setToolTip(f"run-{i + 1:02d}: {b.label}, {fmt(b.duration_ms)}"
+                            + ("\nClick to play it" if idle else ""))
+            card.setCursor(Qt.PointingHandCursor if idle or (design and cut) else Qt.ArrowCursor)
             played = 1.0 if b.ended_at else b.played_ms(now) / n
             if played > 0:
                 veils.append(QRectF(rect.left(), rect.top(), rect.width() * played, rect.height()))
-            card.status.setText(status(b, now, waiting=i == s.index and s.in_state("recording")))
+            card.status.setText(status(s, i, now))
+            card.sync(b)
             rects.append(rect)
         self.rects = rects
         recording = s.in_state("recording")
         o = self.overlay
         o.veils, o.empty = veils, not items
-        o.current = rects[s.index] if recording and 0 <= s.index < len(rects) else None
+        o.current = rects[s.index] if s.playing() and 0 <= s.index < len(rects) else None
         o.lines = [(PAD + end * k, QPen(color("ink"), 2))]
         if playhead is not None:
             o.lines.append((PAD + playhead * k, QPen(color("accent"), 2)))
@@ -252,6 +374,32 @@ class Timeline(QScrollArea):
         if recording and self.followed != s.index and o.current is not None:
             self.followed = s.index                      # a new run started: bring it into view
             self.ensureVisible(int(o.current.center().x()), 0, int(o.current.width() / 2) + PAD, 0)
+        p = self.popup
+        if p is not None:
+            if p.isVisible() and p.index < len(self.cards) and (p.editing or self.cards[p.index].cut_off()):
+                p.update_run(s, now)
+            else:
+                self.close_popup()      # closed by the user, its run removed, or now wide enough
+
+    # --- a run shown in full (RunPopup) ---------------------------------------------------------------
+    def show_run(self, index: int, editing: bool):
+        p = self.popup
+        if p is not None and p.isVisible() and (p.index, p.editing) == (index, editing):
+            return
+        self.close_popup()
+        self.popup = RunPopup(self, index, editing)
+        self.popup.update_run(self.session, self.session.now())
+        self.popup.show()
+
+    def hide_preview(self):
+        if self.popup is not None and not self.popup.editing:
+            self.close_popup()
+
+    def close_popup(self):
+        if self.popup is not None:
+            self.popup.close()
+            self.popup.deleteLater()
+            self.popup = None
 
     def rebuild(self):
         s = self.session

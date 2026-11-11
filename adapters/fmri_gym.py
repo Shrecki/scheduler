@@ -31,14 +31,15 @@ import argparse
 import json
 import re
 import shlex
+import sys
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
 from model.tasks import Category, Task
 
-
-DEFAULT_RIG = "examples/rigs/fmri.json"     # under configs/: the rig offered first
+DEFAULT_RIG = "examples/rigs/laptop.json"   # under configs/: the rig offered first (keyboard, no scanner)
+TEARDOWN_S = 5.0    # fmri-play's --duration is the block's minus this: time to close before the block ends
 SWITCHES = (("loop", "--loop"), ("resume", "--resume"), ("dummy_trigger", "--dummy-trigger"),
             ("skip_load_games", "--skip-load-games"))   # fmri-play's, in the order fmri-gym writes them
 
@@ -57,19 +58,19 @@ class GymTask(Task):
         """Which run of its curriculum this is (fmri-play's --run): 1 + the earlier runs of it."""
         return 1 + sum(b.task == self.key and b.params.get("curriculum") == params["curriculum"] for b in before)
 
-    def play(self, params: dict, subject: str, ses: str, run: int, rig: str, duration_s: str) -> list[str]:
-        """fmri-play's arguments for one run."""
+    def play(self, params: dict, subject: str, ses: str, run: int, rig: str, block_s: float) -> list[str]:
+        """fmri-play's arguments for one run of a block of `block_s` seconds."""
         p = {**self.defaults(), **params}
         words = ["--curriculum", f"configs/curricula/{self.backend}/{p['curriculum']}.json",
                  "--subject", subject, "--ses", ses, "--run", str(run), "--rig", rig]
         if not p["play_to_end"]:
-            words += ["--duration", duration_s]
+            words += ["--duration", f"{max(block_s - TEARDOWN_S, 1):g}"]
         return words + [flag for name, flag in SWITCHES if p[name]]
 
     def argv(self, params: dict, **context) -> list[str]:
         p = {**self.defaults(), **params}
         return ["fmri-play", *self.play(p, context["subject"], str(_ses(context)), self.run_number(p, context["before"]),
-                                        f"configs/{p['rig']}", context["duration_s"])]
+                                        f"configs/{p['rig']}", float(context["duration_s"]))]
 
 
 @dataclass(frozen=True)
@@ -92,15 +93,18 @@ def gym_to_task(root: Path | str, category: Category = Category.VIDEO_GAME, dura
       that plays several in a row ("<name>": "all", controller variants like "all-GMPD3-ABXY-nav").
     - rig: the rig files, configs/<team>/rigs/<rig>.json (`rig` first).
     - play_to_end: no --duration, fmri-play plays the curriculum to its end (the block's duration is
-      then only the plan). Off: the run lasts the block's duration.
+      then only the plan). Off: --duration is the block's duration minus TEARDOWN_S, so it has
+      time to close before the block ends.
     - loop, resume, dummy_trigger, skip_load_games: fmri-play's switches (`fmri-play --help`).
     --subject and --ses are the session's; --run counts the earlier runs of the same curriculum, as
     fmri-gym's session scripts do. Inside a curriculum (phases, seeds, keys): fmri-gym's session-editor.
     """
-    configs = Path(root, "configs")
+    root = Path(root).expanduser()
+    configs = root / "configs"
     rigs = sorted(str(p.relative_to(configs)) for p in configs.glob("*/rigs/*.json"))
     rigs = tuple(sorted(rigs, key=lambda r: r != rig))             # `rig` first, if there
-    if not rigs:
+    if not (configs / "curricula").is_dir() or not rigs:
+        print(f"fmri-gym: no checkout with curricula and rig files at {root}: no game tasks", file=sys.stderr)
         return []
     tasks: list[Task] = []
     for folder in sorted(p for p in configs.glob("curricula/*") if p.is_dir()):
@@ -111,9 +115,9 @@ def gym_to_task(root: Path | str, category: Category = Category.VIDEO_GAME, dura
                 f"fmrigym_{folder.name}", _title(folder), category, ("fmri-play",),
                 {"curriculum": curricula, "rig": rigs, "play_to_end": False, "loop": False, "resume": False,
                  "dummy_trigger": False, "skip_load_games": False},
-                duration_s=duration_s, project=Path(root), backend=folder.name))
+                duration_s=duration_s, project=root, backend=folder.name))
     tasks.append(ScriptLine("fmrigym_line", "Script line (fmri-gym)", line_category, ("sh", "-c"),
-                            {"command": "", "rig": rigs}, duration_s=duration_s, project=Path(root)))
+                            {"command": "", "rig": rigs}, duration_s=duration_s, project=root))
     return tasks
 
 
@@ -154,7 +158,7 @@ class SessionScripts:
     `tasks`: all the tasks (task_definitions.TASKS), which a script's lines are read back as."""
 
     def __init__(self, root: Path | str, tasks: list[Task], rig: str = DEFAULT_RIG):
-        self.root, self.tasks, self.rig = Path(root), tasks, rig
+        self.root, self.tasks, self.rig = Path(root).expanduser(), tasks, rig
 
     def _task(self, key: str) -> Task:
         return next(t for t in self.tasks if t.key == key)
@@ -173,7 +177,7 @@ class SessionScripts:
                 p = {**task.defaults(), **block.params}
                 words = [*PLAY, *task.play(p, '"$SUBJECT"', '"$SES"', task.run_number(p, session.blocks[:i]),
                                            '"$RIG"' if p["rig"] == rig else f"configs/{p['rig']}",
-                                           f"{block.duration_ms / 1000:g}")]
+                                           block.duration_ms / 1000)]
                 lines.append(" ".join(w if w in HEAD_VARS else shlex.quote(w) for w in words))
             else:
                 params = dict(block.params)
@@ -226,7 +230,8 @@ class SessionScripts:
             rig = (args.rig or "").removeprefix("./").removeprefix("configs/")
             if rig in game.choices("rig"):
                 params["rig"] = rig                      # else (given at launch, or unknown): the default
-            return {"task": game.key, "duration_s": args.duration or game.duration_s, "parameters": params}
+            block_s = args.duration + TEARDOWN_S if args.duration else game.duration_s
+            return {"task": game.key, "duration_s": block_s, "parameters": params}
         other = next((t for t in self.tasks if isinstance(t, ScriptLine)), None)
         if other is None:
             raise ValueError(f"no task for a line that is no fmri-gym run: {line}")

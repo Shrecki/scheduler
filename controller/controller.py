@@ -23,6 +23,8 @@ class Controller:
         view.saveDesign.connect(self.session.save_design)
         view.exportScript.connect(self.session.save_script)
         view.importScript.connect(self.session.load_script)
+        view.autoplayToggled.connect(self.set_autoplay)
+        view.playRequested.connect(lambda index: sm.play(index=index))
         launcher.launched.connect(sm.launched)
         launcher.exited.connect(lambda code: sm.process_exited(exit_code=code))
         self.timer = QTimer(interval=self.TICK_MS, timeout=self.tick)
@@ -38,6 +40,11 @@ class Controller:
         self.view.show()
         self.timer.start()
         return True
+
+    def set_autoplay(self, on: bool):
+        self.session.set_autoplay(on)
+        if on:
+            self.sm.resume()                    # idle: go on with the next run (ignored otherwise)
 
     def tick(self):
         if self.session.in_state("recording"):
