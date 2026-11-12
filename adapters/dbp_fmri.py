@@ -53,7 +53,7 @@ class DBPfMRITask(Task):
         return words
 
 
-def scripts_to_task(root: Path | str, category: Category = Category.COGNITIVE_TASK_MRI, duration_s: float = 300,
+def dbp_mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI, duration_s: float = 300,
                     durations: dict | None = None) -> list[Task]:
     """The run scripts of a checkout, as it is now: one task per <folder>/<prefix>_run.py. None there: none.
 
@@ -82,7 +82,8 @@ def scripts_to_task(root: Path | str, category: Category = Category.COGNITIVE_TA
             params["run"] = (NEXT, *numbers)
         key = prefix.lower()
         label = folder.name if key == folder.name.lower() else f"{folder.name} ({prefix})"
-        tasks.append(ScriptTask(key, label, category, ("python", "-m", f"{folder.name}.{script.stem}"), params,
+        command = ("python", "-m", f"{folder.name}.{script.stem}")
+        tasks.append(DBPfMRITask(key, label, category, command, params,
                                 duration_s=(durations or {}).get(key, duration_s), project=root,
                                 options=tuple(options)))
     return tasks
@@ -139,8 +140,8 @@ def _literal(node, missing=None):
         return missing
 
 
-def _run_numbers(folder: Path) -> list[int]:
+def _run_numbers(folder: Path) -> list[str]:
     """The run numbers in the folder's file names (resources/vcst_stimuli_run2.csv: 2), data/ aside."""
     found = (re.search(r"run[_-]?(\d+)", path.stem, re.IGNORECASE) for path in folder.rglob("*")
              if "data" not in path.relative_to(folder).parts and path.is_file())
-    return sorted({int(m[1]) for m in found if m})
+    return sorted({m[1] for m in found if m})

@@ -85,7 +85,7 @@ class ScriptLine(Task):
 
 
 def gym_to_task(root: Path | str, category: Category = Category.VIDEO_GAME, duration_s: float = 300,
-                rig: str = DEFAULT_RIG, line_category: Category = Category.COGNITIVE_TASK) -> list[Task]:
+                rig: str = DEFAULT_RIG, line_category: Category = Category.VIDEO_GAME) -> list[Task]:
     """The tasks of an fmri-gym checkout, as it is now. No checkout there: none.
 
     A GymTask's parameters:

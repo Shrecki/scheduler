@@ -11,11 +11,11 @@ Plans a session as a timeline of blocks, then runs each block's task as its own 
 git clone [repo name]
 cd [repo name]
 uv venv schedulerEnv --python 3.11
-uv pip install "PySide6-Essentials==6.11.3" "python-statemachine>=3.2"
+uv pip install -r requirements.txt
 ```
 
-This environment makes no assumption as to the individual environments available elsewhere!
-Activation of environments should be done in the function calls of the relevant programs!
+This environment makes no assumption as to the individual environments available elsewhere, and instead assumes every subrepo you might want to use has a .venv within its corresponding folder.
+It also assumes uv is available to run these other environments.
 
 ## Example usage
 
