@@ -5,11 +5,13 @@ This adapter extracts the arguments from the run scripts from which to build the
 """
 
 import ast
+import operator
 import re
 import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
 
 from model.tasks import Category, Task
 
@@ -21,7 +23,8 @@ FILLED = {      # options the session fills in, by name: the scheduler's value t
     "duration": "duration_s",
 }
 SKIPPED = {"help", "version", "count", "store_const", "append_const"}   # actions that take no value from a block
-
+ARITHMETIC = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+              ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod}   # what a script's constants may use
 
 @dataclass(frozen=True)
 class DBPfMRITask(Task):
@@ -54,7 +57,8 @@ class DBPfMRITask(Task):
 
 
 def dbp_mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI, duration_s: float = 300,
-                    durations: dict | None = None) -> list[Task]:
+                    durations: dict | None = None, length: str | tuple[str, ...] = (),
+                    startup_s: float = 0) -> list[Task]:
     """The run scripts of a checkout, as it is now: one task per <folder>/<prefix>_run.py. None there: none.
 
     Its key is the prefix in lower case ("vcst"), its label the folder's name ("VCST"; "WCST (wcst_meg)"
@@ -74,7 +78,8 @@ def dbp_mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MR
                   file=sys.stderr)
             continue
         try:
-            options, params = _options(script)
+            tree = ast.parse(script.read_text(encoding="utf-8"), str(script))
+            options, params = _options(tree)
         except (OSError, SyntaxError, ValueError) as exc:
             print(f"run scripts: could not read {script.relative_to(root)} ({exc}): left out", file=sys.stderr)
             continue
@@ -83,16 +88,16 @@ def dbp_mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MR
         key = prefix.lower()
         label = folder.name if key == folder.name.lower() else f"{folder.name} ({prefix})"
         command = ("python", "-m", f"{folder.name}.{script.stem}")
+        run_s = (durations or {}).get(key) or _length(tree, length) or duration_s
         tasks.append(DBPfMRITask(key, label, category, command, params,
-                                duration_s=(durations or {}).get(key, duration_s), project=root,
+                                duration_s=run_s + startup_s, project=root,
                                 options=tuple(options)))
     return tasks
 
 
-def _options(script: Path) -> tuple[list, dict]:
+def _options(tree: ast.Module) -> tuple[list, dict]:
     """A script's argparse options, from its add_argument(...) calls in the order they come:
     (options as ScriptTask keeps them, the parameters a block gets)."""
-    tree = ast.parse(script.read_text(encoding="utf-8"), str(script))
     calls = sorted((node for node in ast.walk(tree) if isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument"),
                    key=lambda node: (node.lineno, node.col_offset))
@@ -139,9 +144,56 @@ def _literal(node, missing=None):
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         return missing
 
+def _length(tree: ast.Module, expressions: str | tuple[str, ...]) -> float | None:
+    """A run's length in seconds: the first of `expressions` the script's constants can compute."""
+    constants = _constants(tree)
+    for expression in [expressions] if isinstance(expressions, str) else expressions:
+        value = _number(ast.parse(expression, mode="eval").body, constants)
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _constants(tree: ast.Module) -> dict[str, float]:
+    """The script's numeric constants, as its top-level assignments compute them, in order
+    (FINAL_FIXATION = 5.0; MAX_RUN_DURATION = 7 * 60.0 - FINAL_FIXATION: 415.0). A name given a value
+    computed any other way (a call, a config value) is left out."""
+    values: dict[str, float] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            continue
+        if isinstance(target, ast.Name):
+            number = _number(value, values)
+            if number is None:
+                values.pop(target.id, None)
+            else:
+                values[target.id] = number
+    return values
+
+
+def _number(node: ast.AST, names: dict[str, float]) -> float | None:
+    """Arithmetic on numbers and known `names` (7 * 60.0 - FINAL_FIXATION); None for anything else."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+        return node.value
+    if isinstance(node, ast.Name):
+        return names.get(node.id)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _number(node.operand, names)
+        return None if value is None else -value if isinstance(node.op, ast.USub) else value
+    if isinstance(node, ast.BinOp) and type(node.op) in ARITHMETIC:
+        left, right = _number(node.left, names), _number(node.right, names)
+        try:
+            return None if left is None or right is None else ARITHMETIC[type(node.op)](left, right)
+        except ArithmeticError:         # a division by zero, say
+            return None
+    return None
 
 def _run_numbers(folder: Path) -> list[str]:
     """The run numbers in the folder's file names (resources/vcst_stimuli_run2.csv: 2), data/ aside."""
     found = (re.search(r"run[_-]?(\d+)", path.stem, re.IGNORECASE) for path in folder.rglob("*")
              if "data" not in path.relative_to(folder).parts and path.is_file())
-    return sorted({m[1] for m in found if m})
+    return sorted({m[1] for m in found if m}, key=int)

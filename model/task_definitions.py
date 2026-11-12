@@ -28,7 +28,8 @@ EYETRACKER_PATH = Path("~/DBP/eyelink-track").expanduser()        # change to yo
 # `rig`: the rig file each run starts with (under configs/); the card offers the others.
 GAME_TASKS = gym_to_task(FMRI_GYM_PATH, rig="examples/rigs/laptop.json")
 
-COG_TASKS_MRI: list[Task] = dbp_mtb_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI)
+COG_TASKS_MRI: list[Task] = dbp_mtb_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI,startup_s=20,
+                               length="MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION")
 COG_TASKS_MEG: list[Task] = []
 COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
 
