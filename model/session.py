@@ -4,9 +4,10 @@ Changes reach the view through notify(): called by the state machine after every
 by the update methods below (design edits, clock ticks), which do not involve the state machine.
 """
 
+import itertools
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -148,6 +149,46 @@ class Session:
         if self.in_state("design"):
             del self.blocks[index]
             self.notify()
+
+    def repeat_blocks(self, indices: list[int]):
+        """Copies of the runs at `indices`, in their order and over again, after the last run, for as
+        long as the next one fits before the end of the session (its total time)."""
+        if self.in_state("design") and indices:
+            free, added = self.free_ms(), 0
+            for block in itertools.cycle([self.blocks[i] for i in sorted(indices)]):
+                if not 0 < block.duration_ms <= free:
+                    break
+                self.blocks.append(self.copy_block(block))
+                free, added = free - block.duration_ms, added + 1
+            self.notice = (f"Repeated: {added} run{'s' * (added > 1)} added, {_mmss(free)} left" if added
+                           else f"No room to repeat: {_mmss(free)} left")
+            self.notify()
+
+    def interleave_blocks(self, indices: list[int]):
+        """A copy of the runs at `indices` after each run that follows them, for as long as the copies
+        fit before the end of the session."""
+        if self.in_state("design") and indices:
+            pattern = [self.blocks[i] for i in sorted(indices)]
+            size, free, added = sum(b.duration_ms for b in pattern), self.free_ms(), 0
+            blocks = self.blocks[:max(indices) + 1]
+            for block in self.blocks[max(indices) + 1:]:
+                blocks.append(block)
+                if size <= free:
+                    blocks += [self.copy_block(b) for b in pattern]
+                    free, added = free - size, added + 1
+            self.blocks[:] = blocks
+            self.notice = (f"Interleaved: {added} cop{'ies' if added > 1 else 'y'} added, {_mmss(free)} left" if added else
+                           "No run after them to interleave with" if max(indices) == len(self.blocks) - 1 else
+                           f"No room to interleave: {_mmss(free)} left")
+            self.notify()
+
+    def copy_block(self, block: Block) -> Block:
+        """The same run again, not yet played."""
+        return replace(block, params=dict(block.params), started_at=None, ended_at=None, exit_code=None)
+
+    def free_ms(self) -> int:
+        """The time left in the plan: the session's total time minus the runs' planned durations."""
+        return self.total_ms - sum(b.duration_ms for b in self.blocks)
 
     def tick(self):
         self.notify()                   # time moved on: the clock and playhead need redrawing
@@ -356,3 +397,9 @@ def write(path: str | Path, text: str):
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
+
+
+def _mmss(ms: int) -> str:
+    """5:03; 0:00 for a plan already past its end."""
+    ms = max(ms, 0)
+    return f"{ms // 60_000}:{ms // 1000 % 60:02d}"

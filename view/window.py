@@ -29,6 +29,8 @@ class MainWindow(QMainWindow):
     importScript = Signal(str)
     autoplayToggled = Signal(bool)
     playRequested = Signal(int)               # run index
+    repeatRequested = Signal(list)            # run indices: repeat them to the end of the session
+    interleaveRequested = Signal(list)        # run indices: a copy after each run that follows them
 
     def __init__(self, sm):
         super().__init__(windowTitle="Block scheduler")
@@ -66,6 +68,8 @@ class MainWindow(QMainWindow):
         self.timeline.paramChanged.connect(self.paramChanged)
         self.timeline.durationChanged.connect(self.durationChanged)
         self.timeline.playRequested.connect(self.playRequested)
+        self.timeline.repeatRequested.connect(self.repeatRequested)
+        self.timeline.interleaveRequested.connect(self.interleaveRequested)
 
         header = QFrame(objectName="bar")
         titles = QVBoxLayout()

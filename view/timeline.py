@@ -4,6 +4,9 @@ the playhead, the end line and the drop marker. Emits what the user asks for; ne
 
 Zoomed out, a run too narrow for its inputs is shown in full beside it while the pointer rests on it,
 and a click on it in design opens it there to edit (RunPopup).
+
+In design, a click selects a run (Ctrl: one more, or one less; Shift: a range); right-click acts on
+the selection: repeat it to the end of the session, interleave it after each run that follows, remove it.
 """
 
 from PySide6.QtCore import QEvent, QLineF, QPoint, QRectF, QTime, Qt, Signal
@@ -155,21 +158,43 @@ class RunCard(DragSource):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        """A click (not a drag): while no run plays, play this one; in design, edit it in full if it is cut off."""
+        """A click (not a drag): while no run plays, play this one; in design, select it (and edit it in
+        full if it is cut off)."""
         s = self.timeline.session
         if self.press is not None and self.inline:
             if s.in_state("idle"):
                 self.timeline.playRequested.emit(self.index)
-            elif s.in_state("design") and self.cut_off():
-                self.timeline.show_run(self.index, editing=True)
+            elif s.in_state("design"):
+                self.timeline.select(self.index, event.modifiers())
+                if self.cut_off() and not event.modifiers() & (Qt.ControlModifier | Qt.ShiftModifier):
+                    self.timeline.show_run(self.index, editing=True)
         self.press = None
 
     def contextMenuEvent(self, event):
-        if self.inline and self.timeline.session.in_state("design"):
-            menu = QMenu(self)
-            remove = menu.addAction(f"Remove run-{self.index + 1:02d}")
-            if menu.exec(event.globalPos()) is remove:
-                self.timeline.blockRemoved.emit(self.index)
+        """In design: what can be done with the selected runs (this one alone, if it is not selected)."""
+        t = self.timeline
+        if not (self.inline and t.session.in_state("design")):
+            return
+        if self.index not in t.selection():
+            t.select(self.index)
+        chosen = t.selection()
+        what = f"run-{chosen[0] + 1:02d}" if len(chosen) == 1 else f"these {len(chosen)} runs"
+        menu = QMenu(self, toolTipsVisible=True)
+        repeat = menu.addAction(f"Repeat {what} to the end")
+        repeat.setToolTip("Copies of them, in order and over again, after the last run, while they fit in the session")
+        interleave = menu.addAction(f"Interleave {what} to the end")
+        interleave.setToolTip("A copy of them after each run that follows them, while they fit in the session")
+        interleave.setEnabled(chosen[-1] < len(t.session.blocks) - 1)
+        menu.addSeparator()
+        remove = menu.addAction(f"Remove {what}")
+        action = menu.exec(event.globalPos())
+        if action is repeat:
+            t.repeatRequested.emit(chosen)
+        elif action is interleave:
+            t.interleaveRequested.emit(chosen)
+        elif action is remove:
+            for i in reversed(chosen):
+                t.blockRemoved.emit(i)
 
 
 class RunPopup(QFrame):
@@ -226,7 +251,7 @@ class Overlay(QWidget):
     def __init__(self, parent: QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.veils, self.current, self.lines, self.empty = [], None, [], False
+        self.veils, self.current, self.selected, self.lines, self.empty = [], None, [], [], False
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -235,9 +260,9 @@ class Overlay(QWidget):
         veil.setAlpha(150)
         for rect in self.veils:
             p.fillRect(rect, veil)
-        if self.current is not None:
+        for rect in self.selected + ([self.current] if self.current is not None else []):
             p.setPen(QPen(color("accent"), 2))
-            p.drawRoundedRect(self.current.adjusted(1, 1, -1, -1), 6, 6)
+            p.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 6, 6)
         for x, pen in self.lines:
             p.setPen(pen)
             p.drawLine(QLineF(x, TOP - 10, x, TOP + CARD_H + 10))
@@ -266,6 +291,9 @@ class Content(QWidget):
     def dropEvent(self, event):
         self.timeline.drop(event)
 
+    def mousePressEvent(self, event):
+        self.timeline.select(None)      # a click beside the runs: none selected
+
 
 def status(s, i: int, now: int) -> str:
     """A run's progress: the play under way, else how it played on the timeline (and how often)."""
@@ -288,11 +316,14 @@ class Timeline(QScrollArea):
     paramChanged = Signal(int, str, object)   # run index, parameter name, value
     durationChanged = Signal(int, int)  # run index, ms
     playRequested = Signal(int)         # a run clicked while none plays
+    repeatRequested = Signal(list)      # run indices: repeat them to the end of the session
+    interleaveRequested = Signal(list)  # run indices: a copy after each run that follows them
 
     def __init__(self, session):
         super().__init__(widgetResizable=False, frameShape=QFrame.NoFrame)
         self.session, self.shown, self.cards, self.rects = session, [], [], []
-        self.caret = self.followed = self.popup = None
+        self.caret = self.followed = self.popup = self.anchor = None
+        self.selected = []          # the runs selected in design (the blocks themselves: indices shift)
         self.content = Content(self)
         self.overlay = Overlay(self.content)
         self.setWidget(self.content)
@@ -315,6 +346,7 @@ class Timeline(QScrollArea):
             for key in keys:
                 QShortcut(QKeySequence(key), self, activated=lambda f=factor: self.zoom_by(f))
         self.viewport().installEventFilter(self)
+        QShortcut(QKeySequence(Qt.Key_Escape), self, activated=lambda: self.select(None))
 
     def zoom_by(self, factor: float | None, anchor: float | None = None):
         """Zoom in (factor > 1) or out, keeping the time under `anchor` (x in the viewport, default: its
@@ -372,6 +404,9 @@ class Timeline(QScrollArea):
         o = self.overlay
         o.veils, o.empty = veils, not items
         o.current = rects[s.index] if s.playing() and 0 <= s.index < len(rects) else None
+        if not s.in_state("design"):
+            self.selected = []                      # a selection is for editing the plan
+        o.selected = [rects[i] for i in self.selection()]
         o.lines = [(PAD + end * k, QPen(color("ink"), 2))]
         if playhead is not None:
             o.lines.append((PAD + playhead * k, QPen(color("accent"), 2)))
@@ -388,6 +423,28 @@ class Timeline(QScrollArea):
                 p.update_run(s, now)
             else:
                 self.close_popup()      # closed by the user, its run removed, or now wide enough
+
+    # --- selection (design): the runs the menu acts on ---------------------------------------------------
+    def select(self, index: int | None, modifiers=Qt.NoModifier):
+        """A click on run `index`: it alone; with Ctrl, one more or one less; with Shift, the runs from
+        the last one clicked to it. None: no run."""
+        blocks = self.session.blocks
+        if index is None:
+            self.selected, self.anchor = [], None
+        elif modifiers & Qt.ShiftModifier and self.anchor is not None and self.anchor < len(blocks):
+            first, last = sorted((self.anchor, index))
+            self.selected = blocks[first:last + 1]
+        elif modifiers & Qt.ControlModifier:
+            kept = [b for b in self.selected if b is not blocks[index]]
+            self.selected = kept if len(kept) < len(self.selected) else self.selected + [blocks[index]]
+            self.anchor = index
+        else:
+            self.selected, self.anchor = [blocks[index]], index
+        self.refresh()
+
+    def selection(self) -> list[int]:
+        """The indices of the selected runs, in timeline order."""
+        return [i for i, b in enumerate(self.session.blocks) if any(b is s for s in self.selected)]
 
     # --- a run shown in full (RunPopup) ---------------------------------------------------------------
     def show_run(self, index: int, editing: bool):
