@@ -43,8 +43,9 @@ class DBPfMRITask(Task):
 
     def argv(self, params: dict, **context) -> list[str]:
         p = {**self.defaults(), **params}
-        if p.get("run") == NEXT:
-            p["run"] = self.run_number(context["before"])
+        if p.get("run") == NEXT:                            # written as the choices are ("01")
+            n = self.run_number(context["before"])
+            p["run"] = next((run for run in self.params["run"][1:] if int(run) == n), f"{n:02d}")
         words = list(self.command)
         for name, flag, kind, field in self.options:
             value = context[field] if field else p[name]

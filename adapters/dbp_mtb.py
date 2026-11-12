@@ -14,23 +14,26 @@ NEXT = "next"   # a run choice: the one after the earlier blocks' (see MtbTask.r
 class MtbTask(Task):
     """One battery: run.py, playing one of its runs."""
  
-    def run_number(self, params: dict, before: list) -> int:
+    def run_number(self, params: dict, before: list) -> str:
         """`run`, or for "next": 1 + the highest run of the earlier blocks of this battery and order,
-        so blocks left on "next" play run 1, 2, 3... and a block that plays a run again shifts nothing."""
+        so blocks left on "next" play run 01, 02, 03... and a block that plays a run again shifts nothing.
+        Written as the run files write it (run_03.tsv: "03")."""
+        if params["run"] != NEXT:
+            return params["run"]
         last = 0
         for block in before:
             p = {**self.defaults(), **block.params}
             if block.task == self.key and p.get("order") == params.get("order"):
-                last = max(last, last + 1 if p["run"] == NEXT else p["run"])
-        return last + 1 if params["run"] == NEXT else params["run"]
+                last = max(last, last + 1 if p["run"] == NEXT else int(p["run"]))
+        return next((run for run in self.params["run"][1:] if int(run) == last + 1), f"{last + 1:02d}")
  
     def argv(self, params: dict, **context) -> list[str]:
         p = {**self.defaults(), **params}
         return super().argv({**p, "run": self.run_number(p, context["before"])}, **context)
  
  
-def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
-                duration_s: float = 300) -> list[Task]:
+  def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
+                  duration_s: float = 300, startup_s: float = 0) -> list[Task]:
     """The batteries of a dbp_mtb checkout, as it is now: one task per run_files/<battery>/ that has
     run files. No checkout there: none.
  
@@ -58,14 +61,14 @@ def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
                    "--run", "{run}", "{no_ttl:--no-ttl}")
         longest = max((_length_s(path) for r in runs for path in r.values()), default=0)
         tasks.append(MtbTask(f"mtb_{battery.name}", f"Multi-Task Battery: {battery.name}", category, command,
-                             params, duration_s=longest or duration_s, project=root))
+                             params, duration_s=(longest or duration_s) + startup_s, project=root))
     return tasks
  
  
-def _runs(folder: Path) -> dict[int, Path]:
-    """A folder's run files, by run number (run_03.tsv: 3)."""
+def _runs(folder: Path) -> dict[str, Path]:
+    """A folder's run files, by run number as their names write it (run_03.tsv: "03")."""
     found = (re.fullmatch(r"run_(\d+)\.tsv", p.name) for p in folder.glob("run_*.tsv"))
-    return {int(m[1]): folder / m[0] for m in found if m}
+    return {m[1]: folder / m[0] for m in found if m}
  
  
 def _length_s(path: Path) -> float:
