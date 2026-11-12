@@ -14,9 +14,13 @@ import os
 from pathlib import Path
 
 from adapters.fmri_gym import gym_to_task
+from adapters.dbp_mtb import mtb_to_task
+from adapters.dbp_fmri import dbp_mtb_to_task
 from .tasks import ROOT, Category, Task, app, view
 
 FMRI_GYM_PATH = Path("~/DBP/fmri-gym").expanduser()   # change to yours
+DBP_MTB_PATH = Path("~/DBP/dbp_mtb").expanduser()
+DBP_FMRI_PATH = Path("~/DBP/dbp_mri").expanduser()
 GOXPY_PATH = Path("~/DBP/goxpyriment").expanduser()              # change to yours
 EYETRACKER_PATH = Path("~/DBP/eyelink-track").expanduser()        # change to yours
 
@@ -24,16 +28,10 @@ EYETRACKER_PATH = Path("~/DBP/eyelink-track").expanduser()        # change to yo
 # `rig`: the rig file each run starts with (under configs/); the card offers the others.
 GAME_TASKS = gym_to_task(FMRI_GYM_PATH, rig="examples/rigs/laptop.json")
 
-COG_TASKS: list[Task] = [
-    Task("syllogism_meg", "Syllogism MEG", Category.COGNITIVE_TASK, app("/usr/games/gnome-sudoku"), duration_s=120),
-    Task("syllogism_mri", "Syllogism MRI", Category.COGNITIVE_TASK, app("/usr/games/gnome-sudoku"), duration_s=120),
-    Task("wisconsin_card_sort_meg", "Wisconsin Card Sort MEG", Category.COGNITIVE_TASK, app("/usr/games/gnome-sudoku"),
-         duration_s=120),
-    Task("wisconsin_card_sort_mri", "Wisconsin Card Sort MRI", Category.COGNITIVE_TASK, app("/usr/games/gnome-sudoku"),
-         duration_s=120),
-    Task("arc_meg", "ARC MEG", Category.COGNITIVE_TASK, app("/usr/games/gnome-sudoku"), duration_s=120),
-    Task("tom_bench", "ToMBench", Category.COGNITIVE_TASK, app("/usr/games/gnome-sudoku"), duration_s=120),
-]
+COG_TASKS_MRI: list[Task] = dbp_mtb_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI)
+COG_TASKS_MEG: list[Task] = []
+COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
+
 
 LOCALIZERS_MEG: list[Task] = [
     Task("multimodal_localizer", "MEG-localizer (multimodal localizer)", Category.LOCALIZER_MEG,
@@ -51,10 +49,7 @@ LOCALIZERS_MEG: list[Task] = [
     # Task("smooth_pursuit", "Smooth Pursuit localizer", Category.LOCALIZER_MEG, app("/usr/games/gnome-sudoku"), duration_s=120),
 ]
 
-LOCALIZERS_MRI: list[Task] = [
-    Task("mtb_localizer", "Multiple-Task-Battery MRI localizer", Category.LOCALIZER_MRI, app("/usr/games/gnome-sudoku"),
-         duration_s=190),
-]
+LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI)
 
 EYETRACKERS: list[Task] = [
     Task("eyetracker_calibration", "EyeTracker calibration", Category.EYETRACKER_CALIBRATION,
@@ -63,18 +58,14 @@ EYETRACKERS: list[Task] = [
 ]
 
 TASKS_DUMMY: list[Task] = [
-    Task("sudoku", "Sudoku", Category.COGNITIVE_TASK, app("/usr/games/gnome-sudoku"), duration_s=120),
-    Task("mines", "Minesweeper", Category.COGNITIVE_TASK, app("/usr/games/gnome-mines", "--{size}"),
+    Task("sudoku", "Sudoku", Category.COGNITIVE_TASK_MRI, app("/usr/games/gnome-sudoku"), duration_s=120),
+    Task("mines", "Minesweeper", Category.COGNITIVE_TASK_MEG, app("/usr/games/gnome-mines", "--{size}"),
          {"size": ("small", "medium", "big")}, duration_s=120),
     Task("fixation", "Fixation cross", Category.RESTING_STATE,
          app(*view(ROOT / "assets" / "fixation.svg", "--fullscreen")), duration_s=60),
     Task("slideshow", "Wallpaper slideshow", Category.MOVIE_WATCHING,
          app(*view("{folder}", "--slide-show")), {"folder": "/usr/share/backgrounds"}, duration_s=90),
-    Task("chess", "Chess", Category.VIDEO_GAME, app("/usr/games/gnome-chess"), duration_s=120),
-    Task("solitaire", "Solitaire", Category.VIDEO_GAME, app("/usr/games/sol"), duration_s=120),
     Task("checkerboard_meg", "Checkerboard", Category.LOCALIZER_MEG,
-         app(*view(ROOT / "assets" / "checkerboard.gif", "--fullscreen")), duration_s=60),
-    Task("checkerboard_mri", "Checkerboard", Category.LOCALIZER_MRI,
          app(*view(ROOT / "assets" / "checkerboard.gif", "--fullscreen")), duration_s=60),
 ]
 

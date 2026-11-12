@@ -17,7 +17,8 @@ ROOT = Path(__file__).parents[1]
 
 
 class Category(Enum):                   # each needs a colour in view/theme.py (CATEGORY_COLORS)
-    COGNITIVE_TASK = "Cognitive task"
+    COGNITIVE_TASK_MRI = "Cognitive task fMRI"
+    COGNITIVE_TASK_MEG = "Cognitive task MEG"
     RESTING_STATE = "Resting state"
     MOVIE_WATCHING = "Movie watching"
     VIDEO_GAME = "Video game"

@@ -18,7 +18,8 @@ TOKENS = {
 # pair stays distinct for colour-blind viewers (the weakest pair, ochre/green, goes to the MEG and MRI
 # localizers, which never share a session) and every label has >= 5.2:1 contrast.
 CATEGORY_COLORS = {
-    "COGNITIVE_TASK": ("#0C57C9", "#FFFFFF"), "RESTING_STATE": ("#7988FC", "#000000"),
+    "COGNITIVE_TASK_MRI": ("#0C57C9", "#FFFFFF"), "COGNITIVE_TASK_MEG": ("#0CC9BF", "#000000"), 
+    "RESTING_STATE": ("#7988FC", "#000000"),
     "MOVIE_WATCHING": ("#82477E", "#FFFFFF"), "VIDEO_GAME": ("#DB55A9", "#000000"),
     "LOCALIZER_MEG": ("#B5820C", "#000000"), "LOCALIZER_MRI": ("#307C1B", "#FFFFFF"),
     "EYETRACKER_CALIBRATION": ("#7C1B77", "#FFFFFF")

@@ -27,9 +27,18 @@ python main.py
 
 ## Setting up the tasks
 
-The tasks available are in model/tasks.py.
-A task is defined by a (unique) key, a display name, a default duration (in seconds) and a launch command.
-For fmri-gym env and others, please ensure the command includes activation of adequate environments, as the scheduler's  env is not assumed to contain them (to ensure no breaking dependencies across softwares).
+Tasks can be setup in task_definitions.py.
+
+However, this can be long and tedious. We recommend instead that you setup an **adapter** for your own repository (unless it really be comprised of a single Python command, in which case a custom task is truly adequate).
+
+Adapters should be put in the adapters folder.
+
+An adapter is responsible for extracting: all potential tasks within a repository, in other words, how they should be ran and what arguments they expose. 
+
+If you wish to add a new repository or task, this is where you should set it up, so that the session editor can properly recognize your task and arguments. Make sure to then add to task_definitions your adapter call, as otherwise the tasks won't be parsed and added!
+
+We already provide adapters for the DBP_CogTask_fMRI repository, the DBP_MEG repository, the DBP_MTB repository and the fmri-gym repository.
+
 
 ## Layout (MVC)
 
@@ -37,12 +46,14 @@ For fmri-gym env and others, please ensure the command includes activation of ad
 |---|---|---|
 | `model/` | `statechart.py` | the states and transitions: the whole flow, readable at a glance |
 | | `session.py` | the data and rules; `notify()` tells the view to redraw |
-| | `tasks.py` | the task catalogue: **add your tasks here** |
+| | `task_definitions.py` | the task catalogue **add your tasks here, if an adapter is overkill**|
+| | `tasks.py` | the task class definitions |
 | `view/` | `window.py` | the main window: `refresh()` redraws from the session |
 | | `blocks.py` | the block palette and the timeline (drag and drop) |
 | | `session_dialog.py`, `theme.py` | startup dialog, colours |
 | `controller/` | `controller.py` | turns clicks, process exits and the clock into model calls |
 | | `launcher.py` | starts and stops one task process (Linux, macOS, Windows) |
+| `adapters/` | the folder where all adapters should be put
 
 Rules: the view only reads the model and emits signals; the controller only calls the model (state
 machine events or update methods); the model never imports Qt, and notifies its observers itself.
