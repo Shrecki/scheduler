@@ -17,6 +17,7 @@ class Controller:
         view.blockMoved.connect(self.session.move_block)
         view.blockRemoved.connect(self.session.remove_block)
         view.repeatRequested.connect(self.session.repeat_blocks)
+        view.shuffleRequested.connect(self.session.shuffle_blocks)
         view.interleaveRequested.connect(self.session.interleave_blocks)
         view.taskChosen.connect(self.session.set_task)
         view.paramChanged.connect(self.session.set_param)

@@ -30,6 +30,7 @@ class MainWindow(QMainWindow):
     autoplayToggled = Signal(bool)
     playRequested = Signal(int)               # run index
     repeatRequested = Signal(list)            # run indices: repeat them to the end of the session
+    shuffleRequested = Signal(list)           # run indices: the same, in a new random order for each round
     interleaveRequested = Signal(list)        # run indices: a copy after each run that follows them
 
     def __init__(self, sm):
@@ -69,6 +70,7 @@ class MainWindow(QMainWindow):
         self.timeline.durationChanged.connect(self.durationChanged)
         self.timeline.playRequested.connect(self.playRequested)
         self.timeline.repeatRequested.connect(self.repeatRequested)
+        self.timeline.shuffleRequested.connect(self.shuffleRequested)
         self.timeline.interleaveRequested.connect(self.interleaveRequested)
 
         header = QFrame(objectName="bar")

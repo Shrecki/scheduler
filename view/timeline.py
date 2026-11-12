@@ -6,7 +6,8 @@ Zoomed out, a run too narrow for its inputs is shown in full beside it while the
 and a click on it in design opens it there to edit (RunPopup).
 
 In design, a click selects a run (Ctrl: one more, or one less; Shift: a range); right-click acts on
-the selection: repeat it to the end of the session, interleave it after each run that follows, remove it.
+the selection: repeat it to the end of the session (in order, or shuffled), interleave it after each
+run that follows, remove it.
 """
 
 from PySide6.QtCore import QEvent, QLineF, QPoint, QRectF, QTime, Qt, Signal
@@ -182,14 +183,20 @@ class RunCard(DragSource):
         menu = QMenu(self, toolTipsVisible=True)
         repeat = menu.addAction(f"Repeat {what} to the end")
         repeat.setToolTip("Copies of them, in order and over again, after the last run, while they fit in the session")
-        interleave = menu.addAction(f"Interleave {what} to the end")
+        shuffle = menu.addAction(f"Shuffle {what} to the end")
+        shuffle.setToolTip("As Repeat, in rounds that each have every one of them once, in a new random order")
+        shuffle.setEnabled(len(chosen) > 1)                 # one run shuffled is that run repeated
+        followed = chosen[-1] < len(t.session.blocks) - 1      # interleaving needs runs after them
+        interleave = menu.addAction(f"Interleave {what} to the end" + ("" if followed else " (no run after them)"))
         interleave.setToolTip("A copy of them after each run that follows them, while they fit in the session")
-        interleave.setEnabled(chosen[-1] < len(t.session.blocks) - 1)
+        interleave.setEnabled(followed)
         menu.addSeparator()
         remove = menu.addAction(f"Remove {what}")
         action = menu.exec(event.globalPos())
         if action is repeat:
             t.repeatRequested.emit(chosen)
+        elif action is shuffle:
+            t.shuffleRequested.emit(chosen)
         elif action is interleave:
             t.interleaveRequested.emit(chosen)
         elif action is remove:
@@ -317,6 +324,7 @@ class Timeline(QScrollArea):
     durationChanged = Signal(int, int)  # run index, ms
     playRequested = Signal(int)         # a run clicked while none plays
     repeatRequested = Signal(list)      # run indices: repeat them to the end of the session
+    shuffleRequested = Signal(list)     # run indices: the same, in a new random order for each round
     interleaveRequested = Signal(list)  # run indices: a copy after each run that follows them
 
     def __init__(self, session):

@@ -18,7 +18,7 @@ TOKENS = {
 # pair stays distinct for colour-blind viewers (the weakest pair, ochre/green, goes to the MEG and MRI
 # localizers, which never share a session) and every label has >= 5.2:1 contrast.
 CATEGORY_COLORS = {
-    "COGNITIVE_TASK_MRI": ("#0C57C9", "#FFFFFF"), "COGNITIVE_TASK_MEG": ("#0CC9BF", "#000000"), 
+    "COGNITIVE_TASK_MRI": ("#0C57C9", "#FFFFFF"), "COGNITIVE_TASK_MEG": ("#0CC9BF", "#141313"), 
     "RESTING_STATE": ("#7988FC", "#000000"),
     "MOVIE_WATCHING": ("#82477E", "#FFFFFF"), "VIDEO_GAME": ("#DB55A9", "#000000"),
     "LOCALIZER_MEG": ("#B5820C", "#000000"), "LOCALIZER_MRI": ("#307C1B", "#FFFFFF"),
@@ -27,6 +27,8 @@ CATEGORY_COLORS = {
 
 QSS = Template("""
 QWidget { color: $ink; }
+QWidget:disabled, QMenu::item:disabled { color: $muted; }   /* what cannot be used looks so */
+QMenu::item:selected { color: $on_accent; }
 QMainWindow, QDialog { background: $surface; }
 QFrame#bar { background: $panel; border-color: $border; border-style: solid; border-width: 0 0 1px 0; }
 QFrame#palette { background: $panel; border-left: 1px solid $border; }
@@ -64,5 +66,7 @@ def apply_theme(app, mode: str = "auto"):
                       (QPalette.Text, "ink"), (QPalette.Button, "panel"), (QPalette.ButtonText, "ink"),
                       (QPalette.Highlight, "accent"), (QPalette.HighlightedText, "on_accent")):
         palette.setColor(role, color(key))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):    # what cannot be used looks so
+        palette.setColor(QPalette.Disabled, role, color("muted"))
     app.setPalette(palette)
     app.setStyleSheet(QSS.substitute(_tokens))

@@ -6,6 +6,7 @@ by the update methods below (design edits, clock ticks), which do not involve th
 
 import itertools
 import json
+import random
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -154,15 +155,28 @@ class Session:
         """Copies of the runs at `indices`, in their order and over again, after the last run, for as
         long as the next one fits before the end of the session (its total time)."""
         if self.in_state("design") and indices:
-            free, added = self.free_ms(), 0
-            for block in itertools.cycle([self.blocks[i] for i in sorted(indices)]):
-                if not 0 < block.duration_ms <= free:
-                    break
-                self.blocks.append(self.copy_block(block))
-                free, added = free - block.duration_ms, added + 1
-            self.notice = (f"Repeated: {added} run{'s' * (added > 1)} added, {_mmss(free)} left" if added
-                           else f"No room to repeat: {_mmss(free)} left")
-            self.notify()
+            self.append_while_fits(itertools.cycle([self.blocks[i] for i in sorted(indices)]), "repeat")
+
+    def shuffle_blocks(self, indices: list[int], rng: random.Random = random):
+        """As repeat_blocks, in rounds that each have every run at `indices` once, in a new random order:
+        the session keeps their proportions."""
+        if self.in_state("design") and indices:
+            pattern = [self.blocks[i] for i in sorted(indices)]
+            rounds = (block for _ in itertools.count() for block in rng.sample(pattern, len(pattern)))
+            self.append_while_fits(rounds, "shuffle")
+
+    def append_while_fits(self, runs, verb: str):
+        """Copies of `runs`, one after the other after the last run, until the next one does not fit."""
+        free, added = self.free_ms(), 0
+        for block in runs:
+            if not 0 < block.duration_ms <= free:
+                break
+            self.blocks.append(self.copy_block(block))
+            free, added = free - block.duration_ms, added + 1
+        done = {"repeat": "Repeated", "shuffle": "Shuffled"}[verb]
+        self.notice = (f"{done}: {added} run{'s' * (added > 1)} added, {_mmss(free)} left" if added
+                       else f"No room to {verb}: {_mmss(free)} left")
+        self.notify()
 
     def interleave_blocks(self, indices: list[int]):
         """A copy of the runs at `indices` after each run that follows them, for as long as the copies
@@ -400,6 +414,6 @@ def write(path: str | Path, text: str):
 
 
 def _mmss(ms: int) -> str:
-    """5:03; 0:00 for a plan already past its end."""
-    ms = max(ms, 0)
-    return f"{ms // 60_000}:{ms // 1000 % 60:02d}"
+    """5:03, 1:12:30; 0:00 for a plan already past its end."""
+    s = max(ms, 0) // 1000
+    return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
