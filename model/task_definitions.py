@@ -16,11 +16,13 @@ from pathlib import Path
 from adapters.fmri_gym import gym_to_task
 from adapters.dbp_mtb import mtb_to_task
 from adapters.dbp_fmri import dbp_mtb_to_task
+from adapters.dbp_meg import go_to_task
 from .tasks import ROOT, Category, Task, app, view
 
 FMRI_GYM_PATH = Path("~/DBP/fmri-gym").expanduser()   # change to yours
 DBP_MTB_PATH = Path("~/DBP/dbp_mtb").expanduser()
 DBP_FMRI_PATH = Path("~/DBP/dbp_mri").expanduser()
+DBP_MEG_PATH = Path("~/DBP/dbp_meg").expanduser()
 GOXPY_PATH = Path("~/DBP/goxpyriment").expanduser()              # change to yours
 EYETRACKER_PATH = Path("~/DBP/eyelink-track").expanduser()        # change to yours
 
@@ -30,25 +32,17 @@ GAME_TASKS = gym_to_task(FMRI_GYM_PATH, rig="examples/rigs/laptop.json")
 
 COG_TASKS_MRI: list[Task] = dbp_mtb_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI,startup_s=20,
                                length="MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION")
-COG_TASKS_MEG: list[Task] = []
+
+
+COG_TASKS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-Reading-Sentences", "MEG-ARC", "MEG-Intuitive-Physics", "MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-VCS", "MEG-verbal-working-memory", "MEG-visual-search", "Wisconsin-Card-Sorting-Task", "MEG-theory-of-mind"],
+                                        category=Category.COGNITIVE_TASK_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd")
+
+
 COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
 
 
-LOCALIZERS_MEG: list[Task] = [
-    Task("multimodal_localizer", "MEG-localizer (multimodal localizer)", Category.LOCALIZER_MEG,
-         app("go", "run", "./examples/MEG-localizer", "-ttl", "parallel:/dev/parport0"), duration_s=120,
-         project=GOXPY_PATH),
-    Task("finger_tone_localizer", "MEG-localizer2 (finger and tone)", Category.LOCALIZER_MEG,
-         app("go", "run", "./examples/MEG-localizer2", "-ttl", "parallel:/dev/parport0"), duration_s=120,
-         project=GOXPY_PATH),
-    Task("multifocal_retinotopy", "MEG-localizer3 (multifocal retinotopy)", Category.LOCALIZER_MEG,
-         app("go", "run", "./examples/MEG-localizer3", "-ttl", "parallel:/dev/parport0"), duration_s=120,
-         project=GOXPY_PATH),
-    Task("retinotopy", "Retinotopy", Category.LOCALIZER_MEG,
-         app("go", "run", "./examples/Retinotopy-multifocal", "-w", "-s", "1", "-ttl", "parallel:/dev/parport0"),
-         duration_s=120, project=GOXPY_PATH),
-    # Task("smooth_pursuit", "Smooth Pursuit localizer", Category.LOCALIZER_MEG, app("/usr/games/gnome-sudoku"), duration_s=120),
-]
+LOCALIZERS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy"],
+                                        category=Category.LOCALIZER_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd")
 
 LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI)
 
@@ -70,7 +64,7 @@ TASKS_DUMMY: list[Task] = [
          app(*view(ROOT / "assets" / "checkerboard.gif", "--fullscreen")), duration_s=60),
 ]
 
-TASKS = TASKS_DUMMY + COG_TASKS + LOCALIZERS_MEG + LOCALIZERS_MRI + GAME_TASKS + EYETRACKERS
+TASKS = COG_TASKS + LOCALIZERS_MEG + LOCALIZERS_MRI + GAME_TASKS + EYETRACKERS
 
 
 def tasks_for(category: Category) -> list[Task]:

@@ -32,8 +32,8 @@ class MtbTask(Task):
         return super().argv({**p, "run": self.run_number(p, context["before"])}, **context)
  
  
-  def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
-                  duration_s: float = 300, startup_s: float = 0) -> list[Task]:
+def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
+                duration_s: float = 300, startup_s: float = 0) -> list[Task]:
     """The batteries of a dbp_mtb checkout, as it is now: one task per run_files/<battery>/ that has
     run files. No checkout there: none.
  

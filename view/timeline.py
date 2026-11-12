@@ -97,10 +97,9 @@ class RunCard(DragSource):
         duration.setTime(ZERO.addMSecs(block.duration_ms))
         duration.timeChanged.connect(lambda t: timeline.durationChanged.emit(index, ZERO.msecsTo(t)))
 
-        self.inputs = QWidget()
-        self.inputs.setFixedWidth(INPUTS_W)             # inputs stay compact in long runs
+        self.inputs = QWidget(objectName="inputs")
         form = QFormLayout(self.inputs)
-        form.setContentsMargins(0, 0, 0, 0)
+        form.setContentsMargins(0, 0, 4, 0)            # a gap before the scroll bar
         form.addRow("Task", task_box)
         form.addRow("Duration", duration)
         task = get_task(block.task)
@@ -109,11 +108,18 @@ class RunCard(DragSource):
             editor = param_editor(value, task.choices(name), lambda v, name=name: emit(index, name, v))
             form.addRow(name, editor)
             self.editors[name] = (editor, task.choices(name))
+        # The inputs scroll when there are more than the card can hold (a program with dozens of flags),
+        # and keep their width in long runs.
+        self.scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame, objectName="inputs")
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setWidget(self.inputs)
+        self.scroll.viewport().setObjectName("inputs")
+        self.scroll.setStyleSheet("#inputs { background: transparent; }")
+        self.scroll.setFixedWidth(INPUTS_W)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(header)
-        layout.addWidget(self.inputs)
-        layout.addStretch()
+        layout.addWidget(self.scroll, 1)
 
     def sync(self, block):
         """Show the run's current values: it may have been edited elsewhere (on the timeline or in its
@@ -189,8 +195,10 @@ class RunPopup(QFrame):
                 self.card.hide()
                 self.card.deleteLater()
             self.card = RunCard(self.index, block, s.max_block_ms, self.timeline, self)
-            inputs = self.card.inputs                  # wide enough for long values, as tall as they need
-            inputs.setFixedWidth(min(max(inputs.sizeHint().width(), INPUTS_W), 2 * INPUTS_W))
+            wanted, bar = self.card.inputs.sizeHint(), self.card.scroll.verticalScrollBar().sizeHint().width()
+            tallest = int(self.timeline.screen().availableGeometry().height() * 0.6)
+            self.card.scroll.setFixedSize(min(max(wanted.width(), INPUTS_W), 2 * INPUTS_W) + bar,   # long values
+                                          min(wanted.height(), tallest))     # every input, or scrolling
             self.layout().insertWidget(0, self.card)
         self.card.setEnabled(s.editable(self.index))
         self.card.status.setText(status(s, self.index, now))
@@ -349,7 +357,7 @@ class Timeline(QScrollArea):
             card.setGeometry(rect.toRect())
             card.setEnabled(s.editable(i))
             cut = card.cut_off()
-            card.inputs.setAttribute(Qt.WA_TransparentForMouseEvents, cut)   # pointer and clicks go to the run
+            card.scroll.setAttribute(Qt.WA_TransparentForMouseEvents, cut)   # pointer and clicks go to the run
             card.setToolTip(f"run-{i + 1:02d}: {b.label}, {fmt(b.duration_ms)}"
                             + ("\nClick to play it" if idle else ""))
             card.setCursor(Qt.PointingHandCursor if idle or (design and cut) else Qt.ArrowCursor)
