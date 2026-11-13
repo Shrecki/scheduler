@@ -7,24 +7,27 @@ gives its script format to the session (SessionScripts(...)).
 - gym_to_task(root): reads an fmri-gym checkout and returns one GymTask per game family (its
   configs/curricula/<backend>/ folder), plus ScriptLine, for a line of a session script that is no
   fmri-play run.
-- SessionScripts(root): the session as fmri-gym's session script, and back (fmri-gym's own format:
-  fmri_gym/standalone/session_script.py, which its session-editor reads and writes):
+- SessionScripts(root, paths=PATHS): the session as a session script in fmri-gym's format
+  (fmri_gym/standalone/session_script.py), and back:
 
     #!/bin/sh
     # fmri-gym session: one line per run, in order.
     set -e
+    FMRI_GYM_PATH=/home/me/fmri-gym
+    DBP_MTB_PATH=/home/me/dbp_mtb
+    SESSION_DIR=/home/me/data/sub-01/ses-002
     SUBJECT=sub-01
     RIG=configs/examples/rigs/laptop.json
     SES=${1:-002}
-    cd /home/me/fmri-gym
-    uv run fmri-play --curriculum configs/curricula/coom/all.json --subject "$SUBJECT" --ses "$SES" --run 1 --rig "$RIG" --duration 60 --loop --resume
-    mkdir -p /home/me/data/.../02_mot && (cd /home/me/mot && . .venv/bin/activate && python run.py)  # scheduler: {...}
+    (cd "$FMRI_GYM_PATH" && uv run fmri-play --curriculum configs/curricula/coom/all.json --subject "$SUBJECT" --ses "$SES" --run 1 --rig "$RIG" --duration 60 --loop --resume)
+    mkdir -p "$SESSION_DIR/blocks/02_mtb" && (cd "$DBP_MTB_PATH" && . .venv/bin/activate && python run.py ...)  # scheduler: {...}
 
-  The `cd` lets the script be started from anywhere (fmri-gym's editor keeps it as a line of its
-  own). A game is written exactly as fmri-gym writes it. Any other run is written as what the
-  scheduler runs, by absolute path, in its folder and environment, followed by a comment the shell
-  ignores, from which read() gets the run back as it was. Read back, a line that is neither becomes
-  a ScriptLine run. Commented-out runs are left out.
+  One line per run, each run in its own folder, so that any line can be run on its own. The folders
+  are set once at the top, by the names task_definitions.py gives them: to share the script, change
+  those lines. A game is written as fmri-gym writes it, behind its `cd`. Any other run is written as
+  what the scheduler runs, in its folder and environment, followed by a comment the shell ignores,
+  from which read() gets the run back as it was. Read back, a line that is neither becomes a
+  ScriptLine run. Commented-out runs are left out. Older scripts (one `cd` line of its own) read too.
 """
 
 import argparse
@@ -85,7 +88,7 @@ class ScriptLine(Task):
 
 
 def gym_to_task(root: Path | str, category: Category = Category.VIDEO_GAME, duration_s: float = 300,
-                rig: str = DEFAULT_RIG, line_category: Category = Category.VIDEO_GAME) -> list[Task]:
+                rig: str = DEFAULT_RIG, line_category: Category = Category.COGNITIVE_TASK_MEG) -> list[Task]:
     """The tasks of an fmri-gym checkout, as it is now. No checkout there: none.
 
     A GymTask's parameters:
@@ -155,10 +158,17 @@ PINNED = re.compile(r"\$\{1:-(\d+)\}")              # SES=${1:-002}
 
 class SessionScripts:
     """fmri-gym's session scripts: write(session) -> text, read(text) -> (design, note).
-    `tasks`: all the tasks (task_definitions.TASKS), which a script's lines are read back as."""
+    `tasks`: all the tasks (task_definitions.TASKS), which a script's lines are read back as.
+    `paths`: folders by name (task_definitions.PATHS; by default `root` as FMRI_GYM_PATH): a script sets
+    those it uses at its top, with SESSION_DIR (the session's data folder), and its lines use them.
 
-    def __init__(self, root: Path | str, tasks: list[Task], rig: str = DEFAULT_RIG):
-        self.root, self.tasks, self.rig = Path(root).expanduser(), tasks, rig
+    Each line plays one run on its own, in its folder: (cd "$FMRI_GYM_PATH" && uv run fmri-play ...).
+    fmri-gym's session editor reads those as commands; it edits only lines that start with uv run fmri-play."""
+
+    def __init__(self, root: Path | str, tasks: list[Task], rig: str = DEFAULT_RIG, paths: dict | None = None):
+        self.root, self.tasks, self.rig = Path(root).expanduser().absolute(), tasks, rig
+        paths = paths or {"FMRI_GYM_PATH": self.root}
+        self.paths = {name: Path(path).expanduser().absolute() for name, path in paths.items()}
 
     def _task(self, key: str) -> Task:
         return next(t for t in self.tasks if t.key == key)
@@ -167,10 +177,10 @@ class SessionScripts:
     def write(self, session) -> str:
         rigs = [b.params["rig"] for b in session.blocks if isinstance(self._task(b.task), GymTask)]
         rig = Counter(rigs).most_common(1)[0][0] if rigs else self.rig        # the script's RIG=
-        lines = [*HEADER, f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + rig)}",
-                 f"SES=${{1:-{session.session_number:03d}}}", f"#RUN"]
-        if self.root.is_dir():
-            lines.append(f"cd {shlex.quote(str(self.root.absolute()))}")
+        paths = {**self.paths, "SESSION_DIR": session.session_dir.absolute()}
+        used: dict[str, Path] = {}                       # the folders the lines use, set at the top
+        word = lambda w: _shell_word(w, paths, used)     # noqa: E731
+        lines = []
         for i, block in enumerate(session.blocks):
             task = self._task(block.task)
             if isinstance(task, GymTask):
@@ -178,17 +188,24 @@ class SessionScripts:
                 words = [*PLAY, *task.play(p, '"$SUBJECT"', '"$SES"', task.run_number(p, session.blocks[:i]),
                                            '"$RIG"' if p["rig"] == rig else f"configs/{p['rig']}",
                                            block.duration_ms / 1000)]
-                lines.append(" ".join(w if w in HEAD_VARS else shlex.quote(w) for w in words))
+                play = " ".join(w if w in HEAD_VARS else shlex.quote(w) for w in words)
+                lines.append(f"(cd {word(str(self.root))} && {play})")
             else:
                 params = dict(block.params)
-                if isinstance(task, ScriptLine):
-                    line = params.pop("command")             # as typed: run where the script is
+                if isinstance(task, ScriptLine):         # as typed, in fmri-gym's folder
+                    line = f"(cd {word(str(self.root))} && {params.pop('command')})"
                 else:
-                    (argv, outdir), folder = session.command(i), task.project
-                    line = f"mkdir -p {shlex.quote(str(outdir))} && {_in_folder(Path(folder or outdir), shlex.join(argv))}"
+                    argv, outdir = session.command(i)
+                    folder = Path(task.project or outdir).absolute()
+                    venv = ". .venv/bin/activate && " if (folder / ".venv").is_dir() else ""
+                    line = (f"mkdir -p {word(str(outdir))} && "
+                            f"(cd {word(str(folder))} && {venv}{' '.join(word(w) for w in argv)})")
                 mark = {"task": task.key, "duration_s": block.duration_ms / 1000, "parameters": params}
                 lines.append(f"{line}  {MARK} {json.dumps(mark)}")
-        return "\n".join(lines) + "\n"
+        head = [*HEADER, *(f"{name}={shlex.quote(str(path))}" for name, path in paths.items() if name in used),
+                f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + rig)}",
+                f"SES=${{1:-{session.session_number:03d}}}", "#RUN"]
+        return "\n".join(head + lines) + "\n"
 
     # reading
     def read(self, text: str) -> tuple[dict, str]:
@@ -203,9 +220,12 @@ class SessionScripts:
             if assign := ASSIGN.fullmatch(line):
                 values[assign[1]] = _value(assign[2])
             elif line.startswith("#"):
-                skipped += _play_args(_words(line[1:]), values) is not None
-            elif len(words) == 2 and words[0] == "cd":
-                folder = folder / words[1]               # where the next lines run (absolute: replaces it)
+                skipped += _play_args(_words(_unwrap(line[1:].strip(), values)[1]), values) is not None
+            elif len(words) == 2 and words[0] == "cd":   # older scripts: where the next lines run
+                folder = folder / _expand(words[1], values)
+            elif (wrapped := _unwrap(line, values))[0] is not None and MARK not in line:
+                here, command = wrapped                  # (cd FOLDER && command): this line only
+                runs.append(self._run(command, _words(command), values, folder / here))
             else:
                 runs.append(self._run(line, words, values, folder))
         return {"runs": runs}, f"{skipped} commented-out runs left out" if skipped else ""
@@ -218,8 +238,10 @@ class SessionScripts:
         except (ValueError, KeyError, TypeError, StopIteration):
             run = task = None
         if task is not None:                             # written by write(): back as it was
-            if isinstance(task, ScriptLine):
-                run.setdefault("parameters", {})["command"] = command.strip()
+            if isinstance(task, ScriptLine):             # without the (cd ... && ...) write() put it in
+                command = command.strip()
+                typed = _unwrap(command, values)[1] if command.startswith("(") else command
+                run.setdefault("parameters", {})["command"] = typed
             return run
         args = _play_args(words, values)
         match = args and re.fullmatch(r"(?:\./)?configs/curricula/([^/]+)/(.+)\.json", args.curriculum)
@@ -241,12 +263,35 @@ class SessionScripts:
         return {"task": other.key, "duration_s": other.duration_s, "parameters": params}
 
 
-def _in_folder(folder: Path, command: str) -> str:
-    """`command` run in `folder`, with the folder's .venv activated if it has one, as the scheduler runs
-    it (`.`, not `source`, which sh does not have)."""
-    folder = folder.absolute()
-    venv = ". .venv/bin/activate && " if (folder / ".venv").is_dir() else ""
-    return f"(cd {shlex.quote(str(folder))} && {venv}{command})"
+def _shell_word(word: str, paths: dict[str, Path], used: dict) -> str:
+    """`word` for the shell; a path in one of `paths` (the deepest that holds it) as "$NAME/...", for the
+    shell to expand, NAME then added to `used`; also the value of a flag (-dir=PATH)."""
+    flag, value = (word.split("=", 1) if re.fullmatch(r"-[\w-]+=.+", word) else ("", word))
+    for name, path in sorted(paths.items(), key=lambda item: -len(str(item[1]))):
+        root = str(path)
+        if root != "/" and (value == root or value.startswith(root + "/")):
+            used[name] = path
+            rest = re.sub(r'([\\"$`])', r"\\\1", value[len(root):])
+            return (shlex.quote(flag + "=") if flag else "") + f'"${name}{rest}"'
+    return shlex.quote(word)
+
+
+_WRAPPED = re.compile(r"cd (\"[^\"]*\"|'[^']*'|[^\s()]+) && (.+)")
+
+
+def _unwrap(line: str, values: dict) -> tuple[Path | None, str]:
+    """(folder, command) for a line run in a folder of its own, (cd FOLDER && command) or
+    cd FOLDER && command, the folder's variables filled in; (None, line) for any other."""
+    match = _WRAPPED.fullmatch(line[1:-1] if line[:1] + line[-1:] == "()" else line)
+    folder = match and _expand((_words(match[1]) or [match[1]])[0], values)
+    if not folder or "$" in folder:                     # a variable the script does not set
+        return None, line
+    return Path(folder), match[2]
+
+
+def _expand(word: str, values: dict) -> str:
+    """`word` with the variables the script set ($NAME, ${NAME}) filled in."""
+    return re.sub(r"\$\{?(\w+)\}?", lambda m: values.get(m[1]) or m[0], word)
 
 
 def _words(line: str) -> list[str]:
@@ -281,7 +326,7 @@ for _name, _flag in SWITCHES:
 
 def _play_args(words: list[str], values: dict) -> argparse.Namespace | None:
     """fmri-play's arguments, if the words play one run (`uv run fmri-play ...` or `fmri-play ...`)."""
-    words = [re.sub(r"\$\{?(\w+)\}?", lambda m: values.get(m[1]) or m[0], word) for word in words]
+    words = [_expand(word, values) for word in words]
     for prefix in (PLAY, PLAY[2:]):
         if words[:len(prefix)] == prefix:
             try:

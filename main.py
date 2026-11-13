@@ -14,7 +14,7 @@ from adapters.fmri_gym import SessionScripts
 from controller.controller import Controller
 from controller.launcher import Launcher
 from model.session import Session
-from model.task_definitions import FMRI_GYM_PATH, TASKS
+from model.task_definitions import FMRI_GYM_PATH, PATHS, TASKS
 from model.statechart import Scheduler
 from view.theme import apply_theme
 from view.window import MainWindow
@@ -24,7 +24,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     apply_theme(app)
     launcher = Launcher()
-    scripts = SessionScripts(FMRI_GYM_PATH, TASKS)           # session scripts in fmri-gym's format
+    scripts = SessionScripts(FMRI_GYM_PATH, TASKS, paths=PATHS)   # session scripts in fmri-gym's format
     sm = Scheduler(model=Session(processes=launcher, scripts=scripts))
     view = MainWindow(sm)
     controller = Controller(sm, view, launcher)

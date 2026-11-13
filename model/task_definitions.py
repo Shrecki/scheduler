@@ -46,10 +46,16 @@ LOCALIZERS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movement
 
 LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI)
 
+
+#eyetrack_calibration --subject test --session 01 --run 02 --mock --no-lpt --loopback 3 --photodiode --screen 1
+
 EYETRACKERS: list[Task] = [
-    Task("eyetracker_calibration", "EyeTracker calibration", Category.EYETRACKER_CALIBRATION,
-         app("python", "-c", "from eyelink_track.commands.gui import run; run()"), duration_s=120,
+    Task("eyetracker_calibration_meg", "EyeTracker calibration MEG", Category.EYETRACKER_CALIBRATION,
+         app("eyetrack_calibration", "--photodiode"), duration_s=120,
          project=EYETRACKER_PATH),
+    Task("eyetracker_calibration_mri", "EyeTracker calibration MRI", Category.EYETRACKER_CALIBRATION,
+             app("eyetrack_calibration", ""), duration_s=120,
+             project=EYETRACKER_PATH),
 ]
 
 TASKS_DUMMY: list[Task] = [
@@ -65,7 +71,7 @@ TASKS_DUMMY: list[Task] = [
 ]
 
 TASKS = COG_TASKS + LOCALIZERS_MEG + LOCALIZERS_MRI + GAME_TASKS + EYETRACKERS
-
+PATHS = {name: value for name, value in dict(globals()).items() if name.endswith("_PATH") and isinstance(value, Path)}
 
 def tasks_for(category: Category) -> list[Task]:
     return [t for t in TASKS if t.category == category]
