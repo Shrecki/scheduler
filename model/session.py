@@ -14,6 +14,7 @@ from enum import Enum
 from pathlib import Path
 
 from .task_definitions import get_task, tasks_for
+from .templates import Template, find_templates
 from .tasks import Category
 
 MIN = 60_000
@@ -81,6 +82,8 @@ class Session:
         self.rec_start = self.rec_end = None
         self.rec_start_wall: datetime | None = None   # wall clock at rec_start, for acq_time
         self.notice = ""                # short message for the operator (e.g. a design that failed to load)
+        self.template_folder: Path | None = None
+        self.templates: list[Template] = []     # what the template folder holds (scan_templates)
 
     def notify(self):
         for observer in self.observers:
@@ -351,21 +354,60 @@ class Session:
         name = name or ("the previous session's design" if isinstance(source, dict) else Path(source).name)
         try:
             design = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
-            blocks = []
-            for run in design["runs"]:
-                task = get_task(run["task"])
-                block = self.new_block(task)
-                block.duration_ms = min(int(float(run["duration_s"]) * 1000), self.max_block_ms)
-                block.params.update({k: v for k, v in run.get("parameters", {}).items()   # invalid ones:
-                                     if task.accepts(k, v)})                              # default kept
-                blocks.append(block)
-            self.blocks = blocks
+            self.blocks = blocks = self.blocks_from(design["runs"])
             self.total_ms = int(float(design.get("total_s", self.total_ms / 1000)) * 1000)
             self.mode = TimelineMode[design.get("timeline_mode", self.mode.name)]
             self.notice = f"Loaded {name}: {len(blocks)} runs"
         except (OSError, ValueError, KeyError, TypeError) as exc:
             self.notice = f"Could not load {name}: {exc}"
         self.notify()
+
+    def blocks_from(self, runs: list[dict]) -> list[Block]:
+        """A design's runs as blocks (an invalid parameter keeps its default)."""
+        blocks = []
+        for run in runs:
+            task = get_task(run["task"])
+            block = self.new_block(task)
+            block.duration_ms = min(int(float(run["duration_s"]) * 1000), self.max_block_ms)
+            block.params.update({k: v for k, v in run.get("parameters", {}).items() if task.accepts(k, v)})
+            blocks.append(block)
+        return blocks
+
+    # --- the template library -----------------------------------------------------------------------
+    def scan_templates(self, folder: str | Path):
+        """Read the templates in `folder` and its subfolders (again)."""
+        self.template_folder = Path(folder).expanduser()
+        if not self.template_folder.is_dir():
+            self.templates, self.notice = [], f"No template folder {self.template_folder}"
+            return self.notify()
+        self.templates, unreadable = find_templates(self.template_folder, self.scripts)
+        n = len(self.templates)
+        self.notice = f"{n} template{'s' * (n != 1)} in {self.template_folder.name}"
+        if unreadable:
+            self.notice += f"; could not read {', '.join(unreadable[:3])}{' and more' * (len(unreadable) > 3)}"
+        self.notify()
+
+    def add_template(self, number: int, index: int = -1):
+        """Insert template `number`'s runs before run `index` (-1: at the end)."""
+        if not self.in_state("design"):
+            return
+        template = self.templates[number]
+        try:
+            blocks = self.blocks_from(template.design["runs"])
+        except (ValueError, KeyError, TypeError) as exc:
+            self.notice = f"Could not add {template.name}: {exc}"
+            return self.notify()
+        at = index if 0 <= index <= len(self.blocks) else len(self.blocks)
+        self.blocks[at:at] = blocks
+        free = self.free_ms()
+        room = f"{_mmss(free)} left" if free >= 0 else f"{_mmss(-free)} over the session's length"
+        self.notice = f"Added {template.name}: {len(blocks)} run{'s' * (len(blocks) != 1)}, {room}"
+        self.notify()
+
+    def load_template(self, number: int):
+        """Replace the runs with template `number`'s."""
+        template = self.templates[number]
+        self.load_design(template.design, template.name)
 
     def save_records(self):
         """The session's own files, rewritten at the start and after each run:

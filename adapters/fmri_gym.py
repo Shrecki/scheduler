@@ -88,7 +88,7 @@ class ScriptLine(Task):
 
 
 def gym_to_task(root: Path | str, category: Category = Category.VIDEO_GAME, duration_s: float = 300,
-                rig: str = DEFAULT_RIG, line_category: Category = Category.COGNITIVE_TASK_MEG) -> list[Task]:
+                rig: str = DEFAULT_RIG, line_category: Category = Category.VIDEO_GAME) -> list[Task]:
     """The tasks of an fmri-gym checkout, as it is now. No checkout there: none.
 
     A GymTask's parameters:
@@ -204,10 +204,14 @@ class SessionScripts:
                 lines.append(f"{line}  {MARK} {json.dumps(mark)}")
         head = [*HEADER, *(f"{name}={shlex.quote(str(path))}" for name, path in paths.items() if name in used),
                 f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + rig)}",
-                f"SES=${{1:-{session.session_number:03d}}}", "#RUN"]
+                f"SES=${{1:-{session.session_number:03d}}}"]
         return "\n".join(head + lines) + "\n"
 
     # reading
+    def is_session(self, text: str) -> bool:
+        """A session script (its header's comment line), not just any shell script."""
+        return HEADER[1] in text.splitlines()
+
     def read(self, text: str) -> tuple[dict, str]:
         """The runs of a script, as a design (what Session.load_design takes), and a note on what was
         left out. Variables it sets ($SUBJECT, $RIG, $RUN_DURATION...) are filled in; its subject and

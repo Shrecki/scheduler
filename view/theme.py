@@ -25,6 +25,7 @@ CATEGORY_COLORS = {
     "EYETRACKER_CALIBRATION": ("#7C1B77", "#FFFFFF")
 }
 
+
 QSS = Template("""
 QWidget { color: $ink; }
 QWidget:disabled, QMenu::item:disabled { color: $muted; }   /* what cannot be used looks so */
@@ -32,6 +33,10 @@ QMenu::item:selected { color: $on_accent; }
 QMainWindow, QDialog { background: $surface; }
 QFrame#bar { background: $panel; border-color: $border; border-style: solid; border-width: 0 0 1px 0; }
 QFrame#palette { background: $panel; border-left: 1px solid $border; }
+QFrame#templates { background: $surface; border-right: 1px solid $border; }
+QWidget#templateList { background: $surface; }
+QLabel#group, QToolButton#group { font-weight: 600; }
+QToolButton#group { border: none; padding: 2px 0; }
 QLabel#title { font-size: 18pt; }
 QLabel#hint { color: $muted; }
 QLabel[level="error"] { color: $error; }
@@ -43,14 +48,14 @@ QPushButton:disabled { color: $muted; background: $disabled; }
 QPushButton#primary { background: $accent; color: $on_accent; border-color: $accent; font-weight: 600; }
 QPushButton#primary:disabled { background: $disabled; color: $muted; border-color: $disabled; }
 """)
-
+ 
 _tokens = TOKENS["light"]
-
-
+ 
+ 
 def color(name: str) -> QColor:
     return QColor(_tokens[name])
-
-
+ 
+ 
 def apply_theme(app, mode: str = "auto"):
     global _tokens
     if mode == "auto":
@@ -70,3 +75,4 @@ def apply_theme(app, mode: str = "auto"):
         palette.setColor(QPalette.Disabled, role, color("muted"))
     app.setPalette(palette)
     app.setStyleSheet(QSS.substitute(_tokens))
+

@@ -317,6 +317,7 @@ def status(s, i: int, now: int) -> str:
 
 class Timeline(QScrollArea):
     blockDropped = Signal(str, int)     # category name, insert before this index
+    templateDropped = Signal(int, int)  # template number, insert its runs before this index
     blockMoved = Signal(int, int)       # from index, insert before this index
     blockRemoved = Signal(int)
     taskChosen = Signal(int, str)       # run index, task key
@@ -512,5 +513,7 @@ class Timeline(QScrollArea):
         kind, value = bytes(event.mimeData().data(MIME)).decode().split(":")
         if kind == "new":
             self.blockDropped.emit(value, index)
+        elif kind == "template":
+            self.templateDropped.emit(int(value), index)
         elif index not in (int(value), int(value) + 1):    # dropping a run in place does nothing
             self.blockMoved.emit(int(value), index)

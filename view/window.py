@@ -10,6 +10,7 @@ from .blocks import Palette, fmt
 from .composition import Composition
 from .timeline import Timeline
 from .session_dialog import SessionDialog
+from .templates import TemplatePanel, saved_folder
 
 
 class MainWindow(QMainWindow):
@@ -32,15 +33,19 @@ class MainWindow(QMainWindow):
     repeatRequested = Signal(list)            # run indices: repeat them to the end of the session
     shuffleRequested = Signal(list)           # run indices: the same, in a new random order for each round
     interleaveRequested = Signal(list)        # run indices: a copy after each run that follows them
+    templateFolderChosen = Signal(str)        # folder path: read its templates
+    templateDropped = Signal(int, int)        # template number, insert its runs before this run (-1: at the end)
+    templateReplaced = Signal(int)            # template number: the design replaced with it
 
     def __init__(self, sm):
         super().__init__(windowTitle="Block scheduler")
         self.sm, self.session = sm, sm.model
-        self.resize(1200, 580)
+        self.resize(1440, 580)
 
         self.identity, self.title = QLabel(objectName="hint"), QLabel(objectName="title")
         self.clock = QLabel(objectName="title")
         self.timeline, self.palette = Timeline(self.session), Palette()
+        self.templates = TemplatePanel(self.session)
         self.composition = Composition(self.session)
         self.message = QLabel(objectName="hint")
         self.mode = QPushButton()
@@ -65,6 +70,10 @@ class MainWindow(QMainWindow):
         self.timeline.blockMoved.connect(self.blockMoved)
         self.timeline.blockRemoved.connect(self.blockRemoved)
         self.palette.add.connect(lambda name: self.blockDropped.emit(name, -1))
+        self.templates.folderChosen.connect(self.templateFolderChosen)
+        self.templates.add.connect(self.templateDropped)
+        self.templates.replace.connect(self.templateReplaced)
+        self.timeline.templateDropped.connect(self.templateDropped)
         self.timeline.taskChosen.connect(self.taskChosen)
         self.timeline.paramChanged.connect(self.paramChanged)
         self.timeline.durationChanged.connect(self.durationChanged)
@@ -86,6 +95,7 @@ class MainWindow(QMainWindow):
         column.addWidget(self.timeline.controls, 0, Qt.AlignRight)
         column.addStretch()
         body = QHBoxLayout()
+        body.addWidget(self.templates)
         body.addLayout(column, 1)
         body.addWidget(self.palette)
         bottom = QHBoxLayout()
@@ -106,6 +116,10 @@ class MainWindow(QMainWindow):
         path, _ = dialog(self, kind, str(self.session.data_root), f"{kind} (*{suffix})")
         if path:
             signal.emit(path if path.endswith(suffix) else path + suffix)
+
+    def template_folder(self) -> str | None:
+        """The template folder chosen at the last launch, if any."""
+        return saved_folder()
 
     def ask_session(self, data_root):
         dialog = SessionDialog(data_root)
@@ -144,6 +158,8 @@ class MainWindow(QMainWindow):
             self.message.setText(f"run-{ended[-1].index + 1:02d} exited (code {ended[-1].exit_code})")
 
         self.palette.setVisible(state("design"))
+        self.templates.setVisible(state("design"))
+        self.templates.refresh()
         self.load.setVisible(state("design"))
         self.save.setVisible(state("design"))
         self.export.setVisible(state("design") and s.scripts is not None)

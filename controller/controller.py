@@ -26,6 +26,9 @@ class Controller:
         view.saveDesign.connect(self.session.save_design)
         view.exportScript.connect(self.session.save_script)
         view.importScript.connect(self.session.load_script)
+        view.templateFolderChosen.connect(self.session.scan_templates)
+        view.templateDropped.connect(self.session.add_template)
+        view.templateReplaced.connect(self.session.load_template)
         view.autoplayToggled.connect(self.set_autoplay)
         view.playRequested.connect(lambda index: sm.play(index=index))
         launcher.launched.connect(sm.launched)
@@ -38,6 +41,8 @@ class Controller:
             return False
         self.session.subject, self.session.session_number = info.subject_name, info.session_number
         self.sm.validate()
+        if folder := self.view.template_folder():   # the template library of the last launch
+            self.session.scan_templates(folder)
         if info.previous:                       # session 02+: start from the previous session's design
             self.session.load_design(info.previous)
         self.view.show()
