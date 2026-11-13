@@ -14,6 +14,8 @@ from enum import Enum
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
+NEXT = "next"   # a "run" choice: the run after this task's earlier runs in the session (Task.next_run)
+
 
 
 class Category(Enum):                   # each needs a colour in view/theme.py (CATEGORY_COLORS)
@@ -25,6 +27,7 @@ class Category(Enum):                   # each needs a colour in view/theme.py (
     LOCALIZER_MEG = "MEG localizer"
     LOCALIZER_MRI = "MRI localizer"
     EYETRACKER_CALIBRATION = "Eyetracker calibration"
+
 
 
 @dataclass(frozen=True)
@@ -53,11 +56,23 @@ class Task:
             return value in default
         return type(value) is type(default) or (type(default) is float and type(value) is int)
 
+    def next_run(self, before: list) -> int:
+        """1 + the highest run of this task's earlier blocks (`before`), so blocks left on "next" play
+        runs 1, 2, 3... and a block that plays a run again shifts nothing."""
+        last = 0
+        for block in before:
+            if block.task == self.key:
+                run = {**self.defaults(), **block.params}["run"]
+                last = max(last, last + 1 if run == NEXT else int(run))
+        return last + 1
+
     def argv(self, params: dict, **context) -> list[str]:
         """The command line, placeholders filled in; a part that comes out empty (a switch that is
         off) is left out. `context` also holds `before`, the session's runs before this one, for a
-        task whose command depends on them (an adapter's, which then overrides this method)."""
+        run on "next", or a task whose command depends on them (an adapter's, which overrides this)."""
         values = {**self.defaults(), **params, **context}
+        if values.get("run") == NEXT:
+            values["run"] = self.next_run(context.get("before", []))
         values = {name: Switch(v) if isinstance(v, bool) else v for name, v in values.items()}
         return [arg for part in self.command if (arg := part.format(**values))]
 

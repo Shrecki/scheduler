@@ -271,7 +271,7 @@ class Session:
         again = f"_{n}" if (n := self.times_played(index)) > 1 else ""         # a run played again: its own folder
         outdir = (self.session_dir / "blocks" / f"{index + 1:02d}_{task.key}{again}").absolute()  # tasks run elsewhere
         argv = task.argv(block.params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
-                         subject=self.subject, session=f"ses-{self.session_number:02d}",
+                         subject=self.subject, session=f"ses-{self.session_number:02d}", ses=self.session_number,
                          before=self.blocks[:index])
         return argv, outdir
 

@@ -17,7 +17,7 @@ from adapters.fmri_gym import gym_to_task
 from adapters.dbp_mtb import mtb_to_task
 from adapters.dbp_fmri import dbp_mtb_to_task
 from adapters.dbp_meg import go_to_task
-from .tasks import ROOT, Category, Task, app, view
+from .tasks import ROOT, Category, Task, app, view, NEXT
 
 FMRI_GYM_PATH = Path("~/DBP/fmri-gym").expanduser()   # change to yours
 DBP_MTB_PATH = Path("~/DBP/dbp_mtb").expanduser()
@@ -47,15 +47,19 @@ LOCALIZERS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movement
 LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI)
 
 
-#eyetrack_calibration --subject test --session 01 --run 02 --mock --no-lpt --loopback 3 --photodiode --screen 1
-
 EYETRACKERS: list[Task] = [
-    Task("eyetracker_calibration_meg", "EyeTracker calibration MEG", Category.EYETRACKER_CALIBRATION,
-         app("eyetrack_calibration", "--photodiode"), duration_s=120,
-         project=EYETRACKER_PATH),
-    Task("eyetracker_calibration_mri", "EyeTracker calibration MRI", Category.EYETRACKER_CALIBRATION,
-             app("eyetrack_calibration", ""), duration_s=120,
-             project=EYETRACKER_PATH),
+    Task("eyetrack_calibration_meg", "EyeTrack Calibration (MEG)", Category.EYETRACKER_CALIBRATION,
+         ("eyetrack_calibration", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}",
+          "{mock:--mock}", "{no_lpt:--no-lpt}", "--loopback", "{loopback}", "--photodiode",
+          "--screen", "{screen}"),
+         {"run": (NEXT, 1, 2, 3, 4), "mock": False, "no_lpt": False, "loopback": 3, "photodiode": True, "screen": 1},
+         duration_s=120, project=EYETRACKER_PATH),
+    Task("eyetrack_calibration_meg_mri", "EyeTrack Calibration (MRI)", Category.EYETRACKER_CALIBRATION,
+             ("eyetrack_calibration", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}",
+              "{mock:--mock}", "{no_lpt:--no-lpt}", "--loopback", "{loopback}",
+              "--screen", "{screen}"),
+             {"run": (NEXT, 1, 2, 3, 4), "mock": False, "no_lpt": False, "loopback": 3, "photodiode": True, "screen": 1},
+             duration_s=120, project=EYETRACKER_PATH),
 ]
 
 TASKS_DUMMY: list[Task] = [
