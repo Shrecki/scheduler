@@ -168,7 +168,7 @@ class SessionScripts:
         rigs = [b.params["rig"] for b in session.blocks if isinstance(self._task(b.task), GymTask)]
         rig = Counter(rigs).most_common(1)[0][0] if rigs else self.rig        # the script's RIG=
         lines = [*HEADER, f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + rig)}",
-                 f"SES=${{1:-{session.session_number:03d}}}"]
+                 f"SES=${{1:-{session.session_number:03d}}}", f"#RUN"]
         if self.root.is_dir():
             lines.append(f"cd {shlex.quote(str(self.root.absolute()))}")
         for i, block in enumerate(session.blocks):
