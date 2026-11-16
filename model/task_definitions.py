@@ -49,16 +49,14 @@ LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALI
 
 EYETRACKERS: list[Task] = [
     Task("eyetrack_calibration_meg", "EyeTrack Calibration (MEG)", Category.EYETRACKER_CALIBRATION,
-         ("eyetrack_calibration", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}",
-          "{mock:--mock}", "{no_lpt:--no-lpt}", "--loopback", "{loopback}", "--photodiode",
+         ("eyetrack_calibration", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}", "--photodiode",
           "--screen", "{screen}"),
-         {"run": (NEXT, 1, 2, 3, 4), "mock": False, "no_lpt": False, "loopback": 3, "photodiode": True, "screen": 1},
+         {"run": (NEXT, 1, 2, 3, 4), "photodiode": True, "screen": 1},
          duration_s=120, project=EYETRACKER_PATH),
     Task("eyetrack_calibration_meg_mri", "EyeTrack Calibration (MRI)", Category.EYETRACKER_CALIBRATION,
              ("eyetrack_calibration", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}",
-              "{mock:--mock}", "{no_lpt:--no-lpt}", "--loopback", "{loopback}",
               "--screen", "{screen}"),
-             {"run": (NEXT, 1, 2, 3, 4), "mock": False, "no_lpt": False, "loopback": 3, "photodiode": True, "screen": 1},
+             {"run": (NEXT, 1, 2, 3, 4), "photodiode": False, "screen": 1},
              duration_s=120, project=EYETRACKER_PATH),
 ]
 
