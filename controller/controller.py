@@ -30,6 +30,8 @@ class Controller:
         view.templateDropped.connect(self.session.add_template)
         view.templateReplaced.connect(self.session.load_template)
         view.autoplayToggled.connect(self.set_autoplay)
+        view.strictToggled.connect(self.session.set_strict)
+        view.totalChanged.connect(self.session.set_total)
         view.playRequested.connect(lambda index: sm.play(index=index))
         launcher.launched.connect(sm.launched)
         launcher.exited.connect(lambda code: sm.process_exited(exit_code=code))
@@ -56,6 +58,6 @@ class Controller:
 
     def tick(self):
         if self.session.in_state("recording"):
-            if self.session.time_is_up():
+            if self.session.must_end():
                 self.sm.end_session()           # ignored once the session is already ending
             self.session.tick()

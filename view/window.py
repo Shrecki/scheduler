@@ -1,9 +1,10 @@
 """The main window. It reads the session to draw itself (refresh), and reports what the user asks for
 as signals. It never changes the session or the state machine itself."""
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtCore import QEvent, QPoint, QRegularExpression, Qt, Signal
+from PySide6.QtGui import QRegularExpressionValidator
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+                               QPushButton, QSizePolicy, QStackedWidget, QToolTip, QVBoxLayout, QWidget)
 
 from model.session import TimelineMode
 from .blocks import Palette, fmt
@@ -11,6 +12,89 @@ from .composition import Composition
 from .timeline import Timeline
 from .session_dialog import SessionDialog
 from .templates import TemplatePanel, saved_folder
+
+
+def set_level(widget: QWidget, level: str):
+    """Colour a widget by its level ("", "warning", "error"), as the theme says."""
+    if widget.property("level") != level:
+        widget.setProperty("level", level)
+        widget.style().polish(widget)
+
+
+class TotalEdit(QStackedWidget):
+    """The session's length, after the clock: click it to type another (HH:MM). Enter or a click
+    elsewhere sets it; Esc leaves it as it was."""
+    changed = Signal(int)                       # the new length, in ms
+
+    def __init__(self):
+        super().__init__()
+        self.ms = self.minimum = 0
+        self.editable, self.typed_from = False, ""
+        self.label = QLabel(objectName="total")
+        self.edit = QLineEdit(objectName="total", placeholderText="HH:MM", alignment=Qt.AlignRight,
+                              validator=QRegularExpressionValidator(QRegularExpression(r"\d{1,2}:[0-5]\d")))
+        self.edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)   # as wide as the label shown
+        self.edit.editingFinished.connect(self.commit)                          # Enter, or focus lost
+        self.edit.installEventFilter(self)
+        self.addWidget(self.label)
+        self.addWidget(self.edit)
+
+    def show_total(self, ms: int, editable: bool, minimum: int = 0):
+        """The length shown; `minimum`: what it must stay above (the time used while recording)."""
+        self.ms, self.minimum, self.editable = ms, minimum, editable
+        self.label.setText(fmt(ms))
+        self.label.setProperty("editable", editable)
+        self.label.setCursor(Qt.PointingHandCursor if editable else Qt.ArrowCursor)
+        self.label.setToolTip("Click to change the session's length (HH:MM)" if editable else "")
+        if not editable:
+            self.close_edit()
+
+    def mousePressEvent(self, event):
+        if self.editable and self.currentWidget() is self.label:
+            h, m = divmod(self.ms // 60_000, 60)
+            self.typed_from = f"{h:02d}:{m:02d}"
+            self.edit.setText(self.typed_from)
+            set_level(self.edit, "")
+            self.edit.setMinimumWidth(self.edit.fontMetrics().horizontalAdvance("00:00") + 24)   # wider than "45:00"
+            self.setCurrentWidget(self.edit)
+            self.edit.setFocus()
+            self.edit.selectAll()
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.ShortcutOverride and event.key() == Qt.Key_Escape:
+            event.accept()                              # Esc is the field's, not a shortcut's (the timeline's)
+            return True
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape:
+            self.edit.setText(self.typed_from)          # as it was
+            self.close_edit()
+            return True
+        if event.type() == QEvent.FocusOut:
+            self.commit(leaving=True)
+        return False
+
+    def commit(self, leaving: bool = False):
+        """Set what was typed, if it changed and is a length; too short: said, and still open (Enter)
+        or left as it was (focus lost)."""
+        if self.currentWidget() is not self.edit:
+            return
+        text = self.edit.text()
+        if text != self.typed_from and self.edit.hasAcceptableInput():
+            h, m = map(int, text.split(":"))
+            ms = (h * 60 + m) * 60_000
+            if ms <= self.minimum and not leaving:
+                set_level(self.edit, "error")
+                QToolTip.showText(self.edit.mapToGlobal(QPoint(0, self.edit.height())),
+                                  f"More than {fmt(self.minimum)}: the time used already", self.edit)
+                return
+            if ms > self.minimum:
+                self.changed.emit(ms)
+        self.close_edit()
+
+    def close_edit(self):
+        if self.currentWidget() is self.edit:
+            self.typed_from = self.edit.text()          # the field loses focus as it goes: nothing more to set
+            self.setCurrentWidget(self.label)
+            self.edit.setMinimumWidth(0)
 
 
 class MainWindow(QMainWindow):
@@ -28,6 +112,8 @@ class MainWindow(QMainWindow):
     saveDesign = Signal(str)
     exportScript = Signal(str)
     importScript = Signal(str)
+    strictToggled = Signal(bool)              # on: at the end time, stop the run playing
+    totalChanged = Signal(int)                # the session's length, in ms
     autoplayToggled = Signal(bool)
     playRequested = Signal(int)               # run index
     repeatRequested = Signal(list)            # run indices: repeat them to the end of the session
@@ -44,6 +130,8 @@ class MainWindow(QMainWindow):
 
         self.identity, self.title = QLabel(objectName="hint"), QLabel(objectName="title")
         self.clock = QLabel(objectName="title")
+        self.total = TotalEdit()
+        self.total.changed.connect(self.totalChanged)
         self.timeline, self.palette = Timeline(self.session), Palette()
         self.templates = TemplatePanel(self.session)
         self.composition = Composition(self.session)
@@ -55,6 +143,10 @@ class MainWindow(QMainWindow):
         self.autoplay = QCheckBox("Autoplay", toolTip="On: each run starts when the one before ends.\n"
                                   "Off: click a run to play it, one played already included.")
         self.autoplay.toggled.connect(self.autoplayToggled)
+        self.strict = QCheckBox("Strict end time", toolTip="On: at the end time, the run playing is stopped and "
+                                "the session ends.\nOff: a run playing at the end time goes on until it ends by "
+                                "itself; no other run starts after it.")
+        self.strict.toggled.connect(self.strictToggled)
         self.load, self.save = QPushButton("Load design…"), QPushButton("Save design…")
         self.load.clicked.connect(lambda: self.ask_file(QFileDialog.getOpenFileName, self.loadDesign))
         self.save.clicked.connect(lambda: self.ask_file(QFileDialog.getSaveFileName, self.saveDesign))
@@ -89,6 +181,7 @@ class MainWindow(QMainWindow):
         top = QHBoxLayout(header)
         top.addLayout(titles, 1)
         top.addWidget(self.clock)
+        top.addWidget(self.total)
         column = QVBoxLayout()
         column.addWidget(self.composition)
         column.addWidget(self.timeline)
@@ -100,6 +193,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self.palette)
         bottom = QHBoxLayout()
         bottom.addWidget(self.message, 1)
+        bottom.addWidget(self.strict)
         bottom.addWidget(self.autoplay)
         for button in (self.load, self.save, self.import_, self.export, self.mode, self.stop, self.skip, self.start):
             bottom.addWidget(button)
@@ -147,7 +241,9 @@ class MainWindow(QMainWindow):
             shown = sum(b.duration_ms for b in s.blocks)    # planned
         else:
             shown = s.block_time_ms() if s.mode == TimelineMode.TOTAL_BLOCK_TIME else s.elapsed_ms()
-        self.clock.setText(f"{fmt(shown)} / {fmt(s.total_ms)}")
+        self.clock.setText(f"{fmt(shown)} /")
+        set_level(self.clock, "warning" if s.rec_start is not None and s.remaining_ms() < 0 else "")  # past the end
+        self.total.show_total(s.total_ms, editable=not state("finalize"), minimum=s.used_ms() if s.rec_start else 0)
 
         ended = [p for p in s.plays if p.ended_at]
         if not ended:
@@ -166,9 +262,11 @@ class MainWindow(QMainWindow):
         self.import_.setVisible(state("design") and s.scripts is not None)
         self.mode.setVisible(state("design") or state("execute"))
         self.autoplay.setVisible(state("execute") or state("recording"))
-        self.autoplay.blockSignals(True)            # show the session's value without reporting it back
-        self.autoplay.setChecked(s.autoplay)
-        self.autoplay.blockSignals(False)
+        self.strict.setVisible(not state("finalize"))
+        for box, value in ((self.autoplay, s.autoplay), (self.strict, s.strict)):
+            box.blockSignals(True)                  # show the session's value without reporting it back
+            box.setChecked(value)
+            box.blockSignals(False)
         self.mode.setText("Back to design" if state("execute") else "Switch to execution")
         self.start.setVisible(state("execute"))
         self.start.setEnabled(s.has_blocks())

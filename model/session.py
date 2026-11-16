@@ -78,6 +78,7 @@ class Session:
         self.farthest = -1              # the farthest block played: the timeline's progress
         self.queued: int | None = None  # the block to play next, if clicked (None: the one after `farthest`)
         self.autoplay = True            # play the blocks one after the other; off: each when clicked
+        self.strict = True              # at the end time, stop the run playing; off: let it end by itself
         self.plays: list[Play] = []     # every launch, replays included
         self.rec_start = self.rec_end = None
         self.rec_start_wall: datetime | None = None   # wall clock at rec_start, for acq_time
@@ -127,6 +128,18 @@ class Session:
 
     def set_autoplay(self, on: bool):
         self.autoplay = on
+        self.notify()
+
+    def set_strict(self, on: bool):
+        self.strict = on
+        self.notify()
+
+    def set_total(self, ms: int):
+        """The session's length; while recording, not less than the time already used."""
+        if self.in_state("finalize") or ms <= max(self.used_ms(), 0):
+            return
+        self.total_ms = int(ms)
+        self.notice = f"Session length: {_mmss(ms)}"
         self.notify()
 
     def set_task(self, index: int, key: str):
@@ -220,12 +233,20 @@ class Session:
     def block_time_ms(self) -> int:
         return sum(p.played_ms(self.now()) for p in self.plays)
 
+    def used_ms(self) -> int:
+        """The time counted against the session's length: recording or block time, by its mode."""
+        return self.block_time_ms() if self.mode == TimelineMode.TOTAL_BLOCK_TIME else self.elapsed_ms()
+
     def remaining_ms(self) -> int:
-        used = self.block_time_ms() if self.mode == TimelineMode.TOTAL_BLOCK_TIME else self.elapsed_ms()
-        return self.total_ms - used
+        return self.total_ms - self.used_ms()
 
     def time_is_up(self) -> bool:
         return self.rec_start is not None and self.remaining_ms() <= 0
+
+    def must_end(self) -> bool:
+        """Time is up and the session ends now. Strict: the run playing is stopped. Not strict: a run
+        playing goes on until it ends by itself (no other starts), then the session ends."""
+        return self.time_is_up() and (self.strict or not self.playing())
 
     def has_blocks(self) -> bool:
         return bool(self.blocks)
@@ -313,7 +334,7 @@ class Session:
 
     def design(self, **extra) -> dict:
         """The design as a reusable template: runs in order, with their task, duration and parameters."""
-        return {**extra, "total_s": self.total_ms / 1000, "timeline_mode": self.mode.name,
+        return {**extra, "total_s": self.total_ms / 1000, "timeline_mode": self.mode.name, "strict": self.strict,
                 "runs": [{"category": b.category.name, "task": b.task, "duration_s": b.duration_ms / 1000,
                           "parameters": b.params} for b in self.blocks]}
 
@@ -357,6 +378,7 @@ class Session:
             self.blocks = blocks = self.blocks_from(design["runs"])
             self.total_ms = int(float(design.get("total_s", self.total_ms / 1000)) * 1000)
             self.mode = TimelineMode[design.get("timeline_mode", self.mode.name)]
+            self.strict = bool(design.get("strict", self.strict))
             self.notice = f"Loaded {name}: {len(blocks)} runs"
         except (OSError, ValueError, KeyError, TypeError) as exc:
             self.notice = f"Could not load {name}: {exc}"
