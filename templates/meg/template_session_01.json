@@ -1,0 +1,335 @@
+{
+  "total_s": 6000.0,
+  "timeline_mode": "TOTAL_RECORDING_TIME",
+  "strict": false,
+  "runs": [
+    {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 180.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
+      "category": "LOCALIZER_MEG",
+      "task": "meg_retinotopy",
+      "duration_s": 155.379,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fullfield": false,
+        "habituation": 20,
+        "max-ecc": 8.4,
+        "p": 467,
+        "seed": 1,
+        "shift": 0,
+        "sound-gap-max": 12.0,
+        "sound-gap-min": 8.0,
+        "trials": 0,
+        "verify": false,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_arc",
+      "duration_s": 400.642,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fb": 350,
+        "lead-in": 2000,
+        "lead-out": 5000,
+        "max-rt": 10000,
+        "n": 0,
+        "run": "next",
+        "run-fb": 10000,
+        "train": 5000,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_intuitive_physics",
+      "duration_s": 518.0,
+      "parameters": {
+        "autostart": false,
+        "block-size": 4,
+        "button-device": "",
+        "instr": 4000,
+        "iti": 1000,
+        "iti-max": 1500,
+        "movies": "stimuli/intuitive_physics",
+        "n": 24,
+        "resp": 2000,
+        "run": 1,
+        "seed": 1,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_mental_rotation",
+      "duration_s": 380.2,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fb": 500,
+        "fb-delay": 600,
+        "fb-delay-max": 1000,
+        "iti": 1000,
+        "iti-max": 1500,
+        "max-rt": 6000,
+        "n": 64,
+        "run": 1,
+        "seed": 1,
+        "stim-width": 1024,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "wisconsin_card_sorting_task",
+      "duration_s": 510.8,
+      "parameters": {
+        "all-cards": false,
+        "autostart": false,
+        "button-device": "",
+        "fb": 800,
+        "fb-delay": 600,
+        "fb-delay-max": 1000,
+        "iti": 800,
+        "iti-max": 1200,
+        "max_duration": "",
+        "maxrun": 10,
+        "minrun": 6,
+        "mouse": false,
+        "n": 128,
+        "resp-keys": "1,2,3,4",
+        "seed": 1,
+        "soa": 0,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 180.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_spatial_working_memory",
+      "duration_s": 437.0,
+      "parameters": {
+        "answer-offset-deg": 3.5,
+        "autostart": false,
+        "button-device": "",
+        "delay": 1000,
+        "delay-max": 1500,
+        "fb": 500,
+        "fb-delay": 600,
+        "fb-delay-max": 1000,
+        "iti": 1000,
+        "iti-max": 1500,
+        "max-rt": 2000,
+        "n": 40,
+        "pre": 500,
+        "run": 1,
+        "seed": 1,
+        "square-deg": 1.2,
+        "step": 1000,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_visual_search",
+      "duration_s": 389.0,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fb": 500,
+        "fb-delay": 600,
+        "fb-delay-max": 1000,
+        "item-deg": 0.8,
+        "iti": 1000,
+        "iti-max": 1500,
+        "max-rt": 2000,
+        "n": 80,
+        "run": 1,
+        "search-height-deg": 9.0,
+        "search-width-deg": 12.0,
+        "seed": 1,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_verbal_working_memory",
+      "duration_s": 457.0,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "delay": 1000,
+        "delay-max": 1500,
+        "fb": 500,
+        "fb-delay": 600,
+        "fb-delay-max": 1000,
+        "iti": 1000,
+        "iti-max": 1500,
+        "max-rt": 3500,
+        "n": 40,
+        "option-offset-deg": 3.5,
+        "run": 1,
+        "seed": 1,
+        "step": 1000,
+        "text-deg": 1.1,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_vcs",
+      "duration_s": 355.7,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fb": 500,
+        "lead-in": 2000,
+        "lead-out": 5000,
+        "max-rt": 5000,
+        "n": 0,
+        "resp-keys": "1,2,3,4",
+        "run": "next",
+        "run-fb": 10000,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_theory_of_mind",
+      "duration_s": 538.15,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fb": 500,
+        "fb-delay": 600,
+        "fb-delay-max": 1000,
+        "iti": 1000,
+        "iti-max": 1500,
+        "max-rt": 4000,
+        "practice": false,
+        "seed": 1,
+        "story": 10000,
+        "text-deg": 0.8,
+        "wait-trigger": false,
+        "wrap-deg": 12.0
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_reading_sentences",
+      "duration_s": 545.0,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fontsize": 72,
+        "nruns": 4,
+        "practice": false,
+        "practice-n": 5,
+        "run": 1,
+        "seed": 1,
+        "trigger": "t",
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 120.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
+      "category": "LOCALIZER_MEG",
+      "task": "meg_eye_movements",
+      "duration_s": 359.806,
+      "parameters": {
+        "autostart": false,
+        "blocks": "saccades,lines,circles,sines",
+        "bridge": "127.0.0.1:5010",
+        "button-device": "",
+        "circle-cycles": 3,
+        "edf": "em<SUBJECT>.edf",
+        "eyelink-record": false,
+        "fix-cross": true,
+        "lines-repeats": 2,
+        "pursuit-amplitude-deg": 0.0,
+        "pursuit-fix-ms": 500,
+        "pursuit-hold-ms": 200,
+        "pursuit-speed-deg": 10.0,
+        "sacc-dwell-max-ms": 1500,
+        "sacc-dwell-min-ms": 1000,
+        "sacc-grid-scale": 0.7,
+        "sacc-passes": 6,
+        "seed": 1,
+        "sine-cycles": 8,
+        "sine-freq-hz": 0.25,
+        "tracker-host": ""
+      }
+    },
+    {
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_rushhour",
+      "duration_s": 900.0,
+      "parameters": {
+        "curriculum": "all",
+        "rig": "examples/rigs/laptop.json",
+        "play_to_end": false,
+        "loop": false,
+        "resume": true,
+        "dummy_trigger": false,
+        "skip_load_games": false
+      }
+    },
+    {
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_aigamestore",
+      "duration_s": 900.0,
+      "parameters": {
+        "curriculum": "game1",
+        "rig": "examples/rigs/laptop.json",
+        "play_to_end": false,
+        "loop": false,
+        "resume": true,
+        "dummy_trigger": false,
+        "skip_load_games": false
+      }
+    },
+    {
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_aigamestore",
+      "duration_s": 900.0,
+      "parameters": {
+        "curriculum": "game4",
+        "rig": "examples/rigs/laptop.json",
+        "play_to_end": false,
+        "loop": false,
+        "resume": true,
+        "dummy_trigger": false,
+        "skip_load_games": false
+      }
+    }
+  ]
+}

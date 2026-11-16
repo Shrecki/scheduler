@@ -32,9 +32,10 @@ What the program's source folder (`sources`/<program>/) adds:
   drop-down of the tables.
 - Planned duration. A program does not say how long it runs; its sources may. In this order:
   - `lengths`, by program name: a function of its flags' defaults and its source folder (go_lengths.py,
-    whose LENGTHS are used by default: every timed screen as long as it can last, a screen waiting for a
-    key READING_S, a screen that ends on an answer answer_s), or an expression over its flags ("lead-in" written lead_in) and its default run's file
-    (rows: its number of rows; a column's name: the column's sum);
+    whose LENGTHS are used by default: the expected length of a run, a timed screen its length, a
+    random one its average, a screen waiting for a key READING_S, a screen that ends on an answer or
+    that a key ends early answer_s), or an expression over its flags ("lead-in" written lead_in) and
+    its default run's file (rows: its number of rows; a column's name: the column's sum);
   - a table-driven program's default protocol, from its rows' onsets and durations.
 """
 
@@ -53,8 +54,8 @@ from pathlib import Path
 from model.tasks import Category, Task
 import math
 
-READING_S = 30          # a screen that waits for a key press, counted this long at most
-ANSWER_S = 6            # a screen that ends on an answer, counted this long at most (or its limit, if shorter)
+READING_S = 25          # a screen that waits for a key press with no limit (instructions, the trigger), typically
+ANSWER_S = 3            # a typical answer, or press of a key that ends a screen early (answer_s caps it at the limit)
 SCREEN_RATIO = 9 / 16   # the stimulus screen's height over its width, for movements as large as it allows
 
 NEXT = "next"   # a run choice: the one after the earlier blocks' (see GoTask.run_number)
@@ -73,8 +74,11 @@ ARITHMETIC = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.m
 
 #
 # Reading here a Go program to extract durations from the code.
-# Durations are estimated as a typical upper bound: a timed screen (a key may end it early) at its full
-# length, a screen that ends on an answer answer_s, a screen that waits for a key with no limit READING_S.
+# Durations are estimated as the expected length of a run: a timed screen at its length, a random one
+# (drawn uniformly) at its average, a screen that ends on an answer or that a key may end early
+# answer_s, a screen that waits for a key with no limit READING_S. A slow participant runs over.
+# The end or results screen that waits for a key once the run is over is not counted: the run's data
+# are saved, and the operator moves on.
 #
 
 def rows(path: Path) -> list[dict]:
@@ -110,9 +114,15 @@ def protocol_s(path: Path) -> float:
 
 
 def answer_s(limit_ms: float) -> float:
-    """A screen that ends on the participant's answer, within limit_ms: ANSWER_S, or the limit if
-    shorter, in s."""
+    """A screen that ends on the participant's answer, or that a key press may end early, within
+    limit_ms: a typical ANSWER_S, or the limit if shorter, in s."""
     return min(ANSWER_S, limit_ms / 1000)
+
+
+def mean_ms(flags: dict, low: str, high: str = "") -> float:
+    """The average of a duration drawn uniformly from the flag low to the flag high (by default
+    low-max: "iti" and "iti-max"), in ms."""
+    return (flags[low] + flags[high or f"{low}-max"]) / 2
 
 
 def go_duration_s(text: str) -> float:
@@ -140,36 +150,34 @@ def protocol_localizer(flags: dict, source: Path) -> float:
 
 
 def flash_localizer(flags: dict, source: Path) -> float:
-    """MEG-localizer3, Retinotopy-multifocal, MEG-retinotopy: the instructions and the end screen
-    (not with -autostart), the trigger (-wait-trigger); the habituation flashes and the trials
-    (-trials; 0: one period, -p), each at most 0.317 s. (MEG-retinotopy's arrows and sounds come
-    on trial onsets, inside the trials.)"""
+    """MEG-localizer3, Retinotopy-multifocal, MEG-retinotopy: the instructions (not with -autostart),
+    the trigger (-wait-trigger); the habituation flashes and the trials (-trials; 0: one period, -p),
+    each 0.217-0.317 s, 0.267 s on average. (MEG-retinotopy's arrows and sounds come on trial onsets,
+    inside the trials.)"""
     flashes = flags["habituation"] + (flags["trials"] or flags["p"])
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
-    return waits * READING_S + flashes * 0.317
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
+    return waits * READING_S + flashes * 0.267
 
 
 def meg_arc(flags: dict, source: Path) -> float:
     """MEG-ARC, its longest run file (a row: a trial; -n: only the first n): per trial two training
-    screens (-train, in full: the done key may end them early), the test screen until the answer
-    (answer_s of -max-rt) and the feedback (-fb), and the run file's four jitters (s); the lead-in,
-    lead-out and run score (-run-fb, 0: none); the instructions and the end screen (not with
-    -autostart), the trigger (-wait-trigger)."""
+    screens until the done key (answer_s of -train), the test screen until the answer (answer_s of
+    -max-rt) and the feedback (-fb), and the run file's four jitters (s); the lead-in, lead-out and
+    run score (-run-fb, 0: none); the instructions (not with -autostart), the trigger (-wait-trigger)."""
     def run_s(trials: list[dict]) -> float:
         trials = trials[:flags["n"]] if flags["n"] else trials
-        ms = (flags["lead-in"] + len(trials) * (2 * flags["train"] + flags["fb"])
-              + flags["lead-out"] + flags["run-fb"])
+        ms = flags["lead-in"] + len(trials) * flags["fb"] + flags["lead-out"] + flags["run-fb"]
         jitters = sum(float(t[c]) for t in trials for c in ("jitter1", "jitter2", "jitter3", "iti_jitter"))
-        return ms / 1000 + len(trials) * answer_s(flags["max-rt"]) + jitters
+        return ms / 1000 + len(trials) * (2 * answer_s(flags["train"]) + answer_s(flags["max-rt"])) + jitters
     files = run_files(source)
     if not files:
         raise FileNotFoundError(f"no run files in {source}")
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + max(run_s(rows(path)) for path in files.values())
 
 
 def reading_sentences(flags: dict, source: Path) -> float:
-    """MEG-Reading-Sentences: the instructions and the results (not with -autostart), the trigger
+    """MEG-Reading-Sentences: the instructions (not with -autostart), the trigger
     (-wait-trigger); its largest run (the sentences and the nonword strings dealt into -nruns runs;
     -practice: -practice-n of each): a 2 s lead-in, then per trial a blank, 12 words and the probe
     (5.9 s) and a fixation of at most 1.5 s."""
@@ -178,20 +186,21 @@ def reading_sentences(flags: dict, source: Path) -> float:
     else:
         trials = sum(math.ceil(len(rows(source / "stimuli" / name)) / flags["nruns"])
                      for name in ("sentences_shuffled.csv", "nonwords_shuffled.csv"))
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + 2 + trials * (5.9 + 1.5)
 
 
 def eye_movements(flags: dict, source: Path) -> float:
-    """MEG-eye-movements: the instructions, a rest screen before each block and the end screen (not
-    with -autostart); per block (-blocks) 0.3 s of blank before and 0.2 s after, and its frames:
-    saccades: 1 s at the centre, then -sacc-passes passes over the 9 grid points, each at most
-    -sacc-dwell-max-ms; lines: -lines-repeats passes over 8 directions, each a fixation (-pursuit-fix-ms),
-    out, a hold (-pursuit-hold-ms) and back at -pursuit-speed-deg, and a last fixation; circles: 4
-    circles (two of the full radius, two of half), each a fixation and -circle-cycles turns at
-    -pursuit-speed-deg; sines: 2 axes, each a fixation and -sine-cycles cycles of 1/-sine-freq-hz.
-    The lines and circles reach as far as the screen allows, at most -pursuit-amplitude-deg: counted
-    as half its height (SCREEN_RATIO of -screen-width-cm, seen from -viewing-distance-cm)."""
+    """MEG-eye-movements: the instructions and a rest screen before each block (not with
+    -autostart); per block (-blocks) 0.3 s of blank before and 0.2 s after, and its frames:
+    saccades: 1 s at the centre, then -sacc-passes passes over the 9 grid points, each for
+    -sacc-dwell-min-ms to -sacc-dwell-max-ms (their average); lines: -lines-repeats passes over 8
+    directions, each a fixation (-pursuit-fix-ms), out, a hold (-pursuit-hold-ms) and back at
+    -pursuit-speed-deg, and a last fixation; circles: 4 circles (two of the full radius, two of half),
+    each a fixation and -circle-cycles turns at -pursuit-speed-deg; sines: 2 axes, each a fixation and
+    -sine-cycles cycles of 1/-sine-freq-hz. The lines and circles reach as far as the screen allows,
+    at most -pursuit-amplitude-deg: counted as half its height (SCREEN_RATIO of -screen-width-cm, seen
+    from -viewing-distance-cm)."""
     blocks = [name.strip() for name in flags["blocks"].split(",")]
     fix, hold = flags["pursuit-fix-ms"] / 1000, flags["pursuit-hold-ms"] / 1000
     speed = flags["pursuit-speed-deg"]
@@ -199,57 +208,57 @@ def eye_movements(flags: dict, source: Path) -> float:
               / (flags["viewing-distance-cm"] * math.tan(math.radians(1))))      # in degrees at the centre
     amp = min(flags["pursuit-amplitude-deg"] or half_h, half_h)
     seconds = {
-        "saccades": 1 + flags["sacc-passes"] * 9 * flags["sacc-dwell-max-ms"] / 1000,
+        "saccades": 1 + flags["sacc-passes"] * 9 * mean_ms(flags, "sacc-dwell-min-ms", "sacc-dwell-max-ms") / 1000,
         "lines": flags["lines-repeats"] * 8 * (fix + 2 * amp / speed + hold) + fix,
         "circles": 4 * fix + flags["circle-cycles"] * 2 * math.pi * (2 * amp + 2 * amp / 2) / speed,
         "sines": 2 * (fix + flags["sine-cycles"] / flags["sine-freq-hz"]),
     }
-    waits = 0 if flags["autostart"] else len(blocks) + 2
+    waits = 0 if flags["autostart"] else len(blocks) + 1
     return waits * READING_S + sum(0.5 + seconds[name] for name in blocks)
 
 
 def intuitive_physics(flags: dict, source: Path) -> float:
-    """MEG-Intuitive-Physics: the instructions and the end screen (not with -autostart), the trigger
-    (-wait-trigger); a 1 s fixation, then -n movies each shown once in each condition, in blocks of
-    -block-size trials, each block opened by its question (-instr); per trial a fixation of at most
-    -iti-max, the movie (180 frames at 30 fps: 6 s) and the response screen, which lasts -resp
+    """MEG-Intuitive-Physics: the instructions (not with -autostart), the trigger (-wait-trigger); a
+    1 s fixation, then -n movies each shown once in each condition, in blocks of -block-size trials,
+    each block opened by its question (-instr); per trial a fixation of -iti to -iti-max (their
+    average), the movie (180 frames at 30 fps: 6 s) and the response screen, which lasts -resp
     whatever the answer."""
     trials = 2 * flags["n"]
     ms = (1000 + trials // flags["block-size"] * flags["instr"]
-          + trials * (flags["iti-max"] + 6000 + flags["resp"]))
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+          + trials * (mean_ms(flags, "iti") + 6000 + flags["resp"]))
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + ms / 1000
 
 
 def left_right(flags: dict, source: Path) -> float:
-    """MEG-left-right: the instructions and the results (not with -autostart), the trigger
+    """MEG-left-right: the instructions (not with -autostart), the trigger
     (-wait-trigger); the run itself is -duration seconds of frames, the arrows inside it."""
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + flags["duration"]
 
 
 def mental_rotation(flags: dict, source: Path) -> float:
-    """MEG-Mental-Rotation, MEG-visual-search: the instructions and the end screen (not with
-    -autostart), the trigger (-wait-trigger); -n trials, each a fixation of at most -iti-max, the
-    pair (the search display) until the answer (answer_s of -max-rt), kept up until the feedback (at
-    most -fb-delay-max, from the answer or the end of the window) and the feedback (-fb)."""
-    ms = flags["n"] * (flags["iti-max"] + flags["fb-delay-max"] + flags["fb"])
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    """MEG-Mental-Rotation, MEG-visual-search: the instructions (not with -autostart), the trigger
+    (-wait-trigger); -n trials, each a fixation of -iti to -iti-max (their average), the pair (the
+    search display) until the answer (answer_s of -max-rt), kept up until the feedback (-fb-delay to
+    -fb-delay-max, their average, from the answer or the end of the window) and the feedback (-fb)."""
+    ms = flags["n"] * (mean_ms(flags, "iti") + mean_ms(flags, "fb-delay") + flags["fb"])
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + ms / 1000 + flags["n"] * answer_s(flags["max-rt"])
 
 
 def motor_localizer(flags: dict, source: Path) -> float:
-    """MEG-motor-localizer: the instructions and the end screen (not with -autostart), the trigger
-    (-wait-trigger); a rest of at most -rest-max, then -reps blocks of each of the -conditions, each
-    its cue (-cue), the movement (-move) and a rest of at most -rest-max (frame-locked, in ms)."""
+    """MEG-motor-localizer: the instructions (not with -autostart), the trigger (-wait-trigger); a
+    rest of -rest to -rest-max (their average), then -reps blocks of each of the -conditions, each its
+    cue (-cue), the movement (-move) and a rest of -rest to -rest-max (frame-locked, in ms)."""
     blocks = flags["reps"] * len(flags["conditions"].split(","))
-    ms = flags["rest-max"] + blocks * (flags["cue"] + flags["move"] + flags["rest-max"])
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    ms = mean_ms(flags, "rest") + blocks * (flags["cue"] + flags["move"] + mean_ms(flags, "rest"))
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + ms / 1000
 
 
 def movie(flags: dict, source: Path) -> float:
-    """MEG-movie: the instructions and the end screen (not with -autostart), the trigger
+    """MEG-movie: the instructions (not with -autostart), the trigger
     (-wait-trigger); 1 s of fixation, the clips (-clips: numbers and ranges, "1-4,7"; empty: all) of
     the 8 parts of the film, or of the 3 practice clips (-practice), each played to its end, -gap
     between two, then 1 s of fixation. The clips are read from -movies (a relative path is from the
@@ -265,51 +274,56 @@ def movie(flags: dict, source: Path) -> float:
     if not folder.is_absolute():
         folder = source.parent.parent / folder
     film = sum(gv_seconds(folder / f"{names[k - 1]}.gv") for k in order)
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + 1 + film + (len(order) - 1) * flags["gap"] / 1000 + 1
 
 
 def theory_of_mind(flags: dict, source: Path) -> float:
-    """MEG-theory-of-mind: the instructions and the end screen (not with -autostart), the trigger
-    (-wait-trigger); every story of its table (stimuli/theory_of_mind.csv, or
-    theory_of_mind_practice.csv with -practice; a row each), each a fixation of at most -iti-max,
-    the story (-story), the statement until the answer (answer_s of -max-rt), kept up until the
-    feedback (at most -fb-delay-max, from the answer or the end of the window) and the feedback
-    (-fb)."""
+    """MEG-theory-of-mind: the instructions (not with -autostart), the trigger (-wait-trigger); every
+    story of its table (stimuli/theory_of_mind.csv, or theory_of_mind_practice.csv with -practice; a
+    row each), each a fixation of -iti to -iti-max (their average), the story (-story), the statement
+    until the answer (answer_s of -max-rt), kept up until the feedback (-fb-delay to -fb-delay-max,
+    their average, from the answer or the end of the window) and the feedback (-fb)."""
     table = "theory_of_mind_practice.csv" if flags["practice"] else "theory_of_mind.csv"
     trials = len(rows(source / "stimuli" / table))
-    ms = trials * (flags["iti-max"] + flags["story"] + flags["fb-delay-max"] + flags["fb"])
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    ms = trials * (mean_ms(flags, "iti") + flags["story"] + mean_ms(flags, "fb-delay") + flags["fb"])
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + ms / 1000 + trials * answer_s(flags["max-rt"])
 
 
 def verbal_working_memory(flags: dict, source: Path) -> float:
-    """MEG-verbal-working-memory: the instructions and the end screen (not with -autostart), the
-    trigger (-wait-trigger); -n trials, each a fixation of at most -iti-max, the 4 steps (-step), a
-    retention of at most -delay-max, the choice until the answer (answer_s of -max-rt), kept up until
-    the feedback (at most -fb-delay-max, from the answer or the end of the window) and the feedback
-    (-fb)."""
-    ms = flags["n"] * (flags["iti-max"] + 4 * flags["step"] + flags["delay-max"] + flags["fb-delay-max"] + flags["fb"])
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    """MEG-verbal-working-memory, MEG-spatial-working-memory: the instructions (not with -autostart),
+    the trigger (-wait-trigger); -n trials, each a fixation of -iti to -iti-max (their average), the
+    empty grid (-pre; spatial only), the 4 steps (-step), a retention of -delay to -delay-max (their
+    average), the choice until the answer (answer_s of -max-rt), kept up until the feedback (-fb-delay
+    to -fb-delay-max, their average, from the answer or the end of the window) and the feedback (-fb)."""
+    ms = flags["n"] * (mean_ms(flags, "iti") + flags.get("pre", 0) + 4 * flags["step"] + mean_ms(flags, "delay")
+                       + mean_ms(flags, "fb-delay") + flags["fb"])
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + ms / 1000 + flags["n"] * answer_s(flags["max-rt"])
 
 
+WCST_SORT_S = 1.2       # a card sort, typically: quicker than ANSWER_S (a timed run took 8:30 for 128 trials)
+
+
 def wcst(flags: dict, source: Path) -> float:
-    """Wisconsin-Card-Sorting-Task: the instructions and the end screen (not with -autostart), the
-    trigger (-wait-trigger); -n trials. With -soa, each lasts exactly -soa. Self-paced (the default),
-    each is a blank of at most -iti-max, the card until the answer, kept up until the feedback (at
-    most -fb-delay-max) and the feedback (-fb); the card has no time limit, so the answer is counted
-    ANSWER_S. -max_duration (a Go duration, "10m") stops the trials, the one under way when it expires
-    finishing at most a blank, or a delay and a feedback (self-paced), or a trial (-soa) later."""
+    """Wisconsin-Card-Sorting-Task: the instructions (not with -autostart), the trigger
+    (-wait-trigger); -n trials. With -soa, each lasts exactly -soa. Self-paced (the default), each is
+    a blank of -iti to -iti-max (their average), the card until the answer (no time limit: a sort,
+    WCST_SORT_S), kept up until the feedback (-fb-delay to -fb-delay-max, their average) and the
+    feedback (-fb).
+    -max_duration (a Go duration, "10m") stops the trials, the one under way when it expires finishing
+    at most a blank, or a delay and a feedback (self-paced), or a trial (-soa) later."""
     if flags["soa"] > 0:
         trials_s = flags["n"] * flags["soa"] / 1000
         tail_s = (flags["soa"] - flags["iti"]) / 1000
     else:
-        trials_s = flags["n"] * ((flags["iti-max"] + flags["fb-delay-max"] + flags["fb"]) / 1000 + ANSWER_S)
+        trials_s = flags["n"] * ((mean_ms(flags, "iti") + mean_ms(flags, "fb-delay") + flags["fb"]) / 1000
+                                 + WCST_SORT_S)
         tail_s = max(flags["iti-max"], flags["fb-delay-max"] + flags["fb"]) / 1000
     if limit_s := go_duration_s(flags["max_duration"]):
         trials_s = min(trials_s, limit_s + tail_s)
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + trials_s
 
 
@@ -317,7 +331,7 @@ def vcs(flags: dict, source: Path) -> float:
     """MEG-VCS, its longest run file (a row: a trial; -n: only the first n): per trial the cards until
     the answer (answer_s of -max-rt), the run file's fixation (jitter, s), the feedback (-fb) and the
     run file's fixation between trials (iti_jitter, s); the lead-in, lead-out and run score (-run-fb,
-    0: none); the instructions and the end screen (not with -autostart), the trigger (-wait-trigger)."""
+    0: none); the instructions (not with -autostart), the trigger (-wait-trigger)."""
     def run_s(trials: list[dict]) -> float:
         trials = trials[:flags["n"]] if flags["n"] else trials
         ms = flags["lead-in"] + len(trials) * flags["fb"] + flags["lead-out"] + flags["run-fb"]
@@ -326,7 +340,7 @@ def vcs(flags: dict, source: Path) -> float:
     files = run_files(source)
     if not files:
         raise FileNotFoundError(f"no run files in {source}")
-    waits = (0 if flags["autostart"] else 2) + flags["wait-trigger"]
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
     return waits * READING_S + max(run_s(rows(path)) for path in files.values())
 
 
@@ -339,6 +353,7 @@ LENGTHS = {
     "MEG-motor-localizer": motor_localizer,
     "MEG-movie": movie,
     "MEG-retinotopy": flash_localizer,
+    "MEG-spatial-working-memory": verbal_working_memory,
     "MEG-theory-of-mind": theory_of_mind,
     "MEG-VCS": vcs,
     "MEG-verbal-working-memory": verbal_working_memory,
