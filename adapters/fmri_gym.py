@@ -154,7 +154,7 @@ HEAD_VARS = ('"$SUBJECT"', '"$SES"', '"$RIG"')      # written unquoted, for the 
 MARK = "# scheduler:"
 ASSIGN = re.compile(r"([A-Za-z_]\w*)=(.*)")
 PINNED = re.compile(r"\$\{1:-(\d+)\}")              # SES=${1:-002}
-
+RUNS_FROM = "#RUN"           # between the setup lines and the first run (fmri-gym's editor saves it as "# RUN")
 
 class SessionScripts:
     """fmri-gym's session scripts: write(session) -> text, read(text) -> (design, note).
@@ -204,7 +204,8 @@ class SessionScripts:
                 lines.append(f"{line}  {MARK} {json.dumps(mark)}")
         head = [*HEADER, *(f"{name}={shlex.quote(str(path))}" for name, path in paths.items() if name in used),
                 f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + rig)}",
-                f"SES=${{1:-{session.session_number:03d}}}"]
+                f"SES=${{1:-{session.session_number:03d}}}",
+                RUNS_FROM]
         return "\n".join(head + lines) + "\n"
 
     # reading
@@ -218,7 +219,7 @@ class SessionScripts:
         session are the scheduler's, not the script's."""
         values, runs, skipped, folder = {}, [], 0, self.root
         for line in (line.strip() for line in text.splitlines()):
-            if not line or line in HEADER or line.startswith(("#!", "set ")):
+            if not line or line in HEADER or line.startswith(("#!", "set ")) or line.replace(" ", "") == RUNS_FROM:
                 continue
             words = _words(line)
             if assign := ASSIGN.fullmatch(line):
