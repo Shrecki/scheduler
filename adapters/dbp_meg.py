@@ -1,5 +1,41 @@
-"""
-Adapter for DBP_MEG (Go programs)
+"""Compiled programs that read their flags with Go's standard flag package (goxpyriment's, for one),
+seen from the scheduler: each program a task, its flags as parameters.
+
+    <goxpyriment>/bin/MEG-localizer      runs as: bin/MEG-localizer -s=07 [the flags a block changes]
+                                         (in <goxpyriment>, the folder above bin/)
+
+Nothing of a program's source is needed: when the scheduler starts, each program is asked for its
+usage (`program -h`; the flag package prints every flag and exits, before the program does anything
+else), and its flags are read from that text, written in the flag package's format:
+
+      -w	Windowed mode                                   no type: a checkbox
+      -d int
+        	Display ID (default -1)                         int, uint: a number box; float: a decimal box
+      -ttl string
+        	TTL device (default "parallel:/dev/parport0")   anything else (string, duration...): a text field
+
+A flag shown without "(default ...)" has Go's zero value: off, 0, or empty. The settings of the PC
+(SITE_FLAGS: display, TTL device and codes, photodiode, keys, screen geometry) are not offered: they
+belong in the program's config file (goxpyriment's site.toml), as DBP_MEG's command_line_args.txt says.
+
+A block passes only the flags it changes (as -name=value), so that defaults the program takes from
+elsewhere still apply (goxpyriment's TOML config file sets any flag not on the command line; the card
+shows the program's built-in defaults). The subject flag (FILLED: goxpyriment's -s) is not a
+parameter: it gets the session's subject, in letters and digits (sub-07: 07), which also keeps
+goxpyriment from opening its setup dialog.
+
+What the program's source folder (`sources`/<program>/) adds:
+- Runs: a program with a -run flag whose folder has numbered run files (stimuli/arc_stimuli_run2.csv: 2)
+  offers "next" or one of those numbers (GoTask.run_number).
+- Protocols: a table-driven program (goxpyriment's MEG-localizer) presents a protocol,
+  protocols/<name>.tsv; its protocol flag (the one whose default names a table: -p) becomes a
+  drop-down of the tables.
+- Planned duration. A program does not say how long it runs; its sources may. In this order:
+  - `lengths`, by program name: a function of its flags' defaults and its source folder (go_lengths.py,
+    whose LENGTHS are used by default: every screen as long as it can last, a screen waiting for a key
+    READING_S), or an expression over its flags ("lead-in" written lead_in) and its default run's file
+    (rows: its number of rows; a column's name: the column's sum);
+  - a table-driven program's default protocol, from its rows' onsets and durations.
 """
 
 import ast
@@ -12,8 +48,11 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-
+from .go_adapter.go_lengths import LENGTHS, run_files, rows
 from model.tasks import Category, Task
+import math
+
+READING_S = 30          # a screen that waits for a key press, counted this long at most
 
 NEXT = "next"   # a run choice: the one after the earlier blocks' (see GoTask.run_number)
 FILLED = ("s", "subject", "subj", "sub", "participant")    # a flag that gets the session's subject
@@ -28,6 +67,12 @@ DEFAULT = re.compile(r" \(default (.*)\)\Z", re.DOTALL)     # the end of a flag'
 ARITHMETIC = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
               ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod}   # what a `lengths` expression may use
 
+
+
+
+#
+# Task definition and parsing!
+#
 
 @dataclass(frozen=True)
 class GoTask(Task):
@@ -69,8 +114,9 @@ def go_to_task(bin_dir: Path | str, names: list[str] | None = None, category: Ca
     Its key is the program's name in lower case with "_" for anything else than letters and digits
     ("MEG-localizer": "meg_localizer"), its label the program's name. `sources`: the folder of the
     programs' source folders (goxpyriment's examples/, DBP_MEG's cmd/). Its planned duration, plus
-    `startup_s`: `durations` by key if given there; else its `lengths` expression by key, if it can be
-    computed; else its default protocol's length (table-driven programs); else `duration_s`. `hidden`:
+    `startup_s`: `durations` by key if given there; else its length, if it can be worked out: `lengths`
+    by program name or key (go_lengths.LENGTHS, and yours, which win: functions or expressions); else its
+    default protocol's length (table-driven programs); else `duration_s`. `hidden`:
     the flags not offered, as names or patterns ("ttl-*"); the program keeps its defaults for them.
     """
     bin_dir = Path(bin_dir).expanduser()
@@ -94,13 +140,18 @@ def go_to_task(bin_dir: Path | str, names: list[str] | None = None, category: Ca
         params.pop(subject, None)
         key = re.sub(r"[^a-z0-9]+", "_", program.name.lower()).strip("_")
         folder = Path(sources).expanduser() / program.name if sources else None
-        flags = {n.replace("-", "_"): v for n, v in params.items() if type(v) in (int, float)}  # defaults, for lengths
+        defaults = dict(params)                                                 # every flag, for lengths
+        flags = {n.replace("-", "_"): v for n, v in params.items() if type(v) in (int, float)}  # for expressions
         params = {n: v for n, v in params.items() if not any(fnmatch.fnmatchcase(n, h) for h in hidden)}
-        runs = _run_files(folder) if folder else {}
+        runs = run_files(folder)
         if runs and type(params.get("run")) is int:
             params["run"] = (NEXT, *runs)
-        table = _table(runs.get(flags.get("run"), next(iter(runs.values()), None)))   # the default run's file
-        length = _length(program.name, (lengths or {}).get(key), {**table, **flags})
+        rule = next((r for table in (lengths or {}, LENGTHS) for n in (program.name, key) if (r := table.get(n))), None)
+        if callable(rule):
+            length = _worked_out(program.name, rule, defaults, folder)
+        else:
+            table = _table(runs.get(flags.get("run"), next(iter(runs.values()), None)))   # the default run's file
+            length = _length(program.name, rule, {**table, **flags})
         protocol = _protocols(folder / "protocols", params) if folder else None
         run_s = (durations or {}).get(key) or length or protocol or duration_s
         tasks.append(GoTask(key, program.name, category, (str(program),), params, duration_s=run_s + startup_s,
@@ -159,7 +210,7 @@ def _protocols(folder: Path, params: dict) -> float | None:
     """For a table-driven program (its protocols/*.tsv in `folder`): its protocol flag, the one whose
     default names a table, becomes a drop-down of the tables (default first); returns the default
     table's length in seconds. None (params unchanged) for any other program."""
-    lengths = {path.stem: _table_s(path) for path in sorted(folder.glob("*.tsv"))}
+    lengths = {path.stem: _or_none(protocol_s, path) for path in sorted(folder.glob("*.tsv"))}
     lengths = {name: seconds for name, seconds in lengths.items() if seconds}
     flag = next((name for name, value in params.items() if isinstance(value, str) and value in lengths), None)
     if flag is None:
@@ -169,42 +220,42 @@ def _protocols(folder: Path, params: dict) -> float | None:
     return lengths[default]
 
 
-def _table_s(path: Path) -> float | None:
-    """A protocol's length in seconds: its latest onset_time + duration (ms); None if it has none."""
+UNREADABLE = (OSError, KeyError, IndexError, TypeError, ValueError, ZeroDivisionError, csv.Error)
+
+
+def _or_none(length, *args) -> float | None:
+    """A length, or None if it cannot be worked out (a table missing or broken...)."""
     try:
-        with path.open(newline="", encoding="utf-8") as f:
-            rows = list(csv.DictReader(f, delimiter="\t"))
-        return max(float(row["onset_time"]) + float(row["duration"]) for row in rows) / 1000
-    except (OSError, KeyError, TypeError, ValueError):
+        return length(*args)
+    except UNREADABLE:
         return None
 
 
-def _run_files(folder: Path) -> dict[int, Path]:
-    """A program's numbered run files, .csv or .tsv anywhere in its source folder, by run number
-    (stimuli/arc_stimuli_run2.csv: 2)."""
-    found: dict[int, Path] = {}
-    for path in sorted(folder.rglob("*")) if folder.is_dir() else ():
-        match = re.search(r"run[_-]?(\d+)$", path.stem, re.IGNORECASE)
-        if match and path.suffix in (".csv", ".tsv") and path.is_file():
-            found.setdefault(int(match[1]), path)
-    return dict(sorted(found.items()))
+def _worked_out(program: str, length, flags: dict, folder: Path | None) -> float | None:
+    """A go_lengths function's value, in seconds; None, and said, if it cannot be worked out."""
+    try:
+        seconds = length(flags, folder)
+    except UNREADABLE as exc:
+        print(f"go programs: {program}: its length could not be worked out ({type(exc).__name__}: {exc})",
+              file=sys.stderr)
+        return None
+    return seconds if seconds and seconds > 0 else None
 
 
 def _table(path: Path | None) -> dict[str, float]:
     """A run file, for a `lengths` expression: rows (its number of rows), and the sum of each of its
     numeric columns, by name. Empty if there is none, or it cannot be read."""
     try:
-        with path.open(newline="", encoding="utf-8") as f:
-            rows = list(csv.DictReader(f, delimiter="\t" if path.suffix == ".tsv" else ","))
-    except (AttributeError, OSError, csv.Error):
+        table = rows(path)
+    except (TypeError, OSError, csv.Error):
         return {}
     sums = {}
-    for column in rows[0] if rows else ():
+    for column in table[0] if table else ():
         try:
-            sums[column] = sum(float(row[column]) for row in rows)
+            sums[column] = sum(float(row[column]) for row in table)
         except (TypeError, ValueError):
             pass
-    return {**sums, "rows": len(rows)}
+    return {**sums, "rows": len(table)}
 
 
 def _length(program: str, expression: str | None, names: dict[str, float]) -> float | None:

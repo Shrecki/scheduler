@@ -37,11 +37,13 @@ COG_TASKS_MRI: list[Task] = dbp_mtb_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TA
 COG_TASKS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-Reading-Sentences", "MEG-ARC", "MEG-Intuitive-Physics", "MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-VCS", "MEG-verbal-working-memory", "MEG-visual-search", "Wisconsin-Card-Sorting-Task", "MEG-theory-of-mind"],
                                         category=Category.COGNITIVE_TASK_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd")
 
+MOVIE_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-movie"],
+                                        category=Category.MOVIE_WATCHING, duration_s=120, sources=DBP_MEG_PATH / "cmd")
 
 COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
 
 
-LOCALIZERS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy"],
+LOCALIZERS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-left-right"],
                                         category=Category.LOCALIZER_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd")
 
 LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI)
@@ -72,7 +74,7 @@ TASKS_DUMMY: list[Task] = [
          app(*view(ROOT / "assets" / "checkerboard.gif", "--fullscreen")), duration_s=60),
 ]
 
-TASKS = COG_TASKS + LOCALIZERS_MEG + LOCALIZERS_MRI + GAME_TASKS + EYETRACKERS
+TASKS = COG_TASKS + LOCALIZERS_MEG + LOCALIZERS_MRI + GAME_TASKS + EYETRACKERS + MOVIE_MEG
 PATHS = {name: value for name, value in dict(globals()).items() if name.endswith("_PATH") and isinstance(value, Path)}
 
 def tasks_for(category: Category) -> list[Task]:
