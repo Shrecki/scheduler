@@ -2,8 +2,9 @@
 
 A worker thread per block does the waiting (blocking on the task's output, then on its exit) and
 only emits signals, which Qt delivers on the main thread. Works on Linux, macOS and Windows.
-The task runs in its own process group, so a stop reaches whatever it started too, and in its own
-Python environment: never the scheduler's (see environment()).
+The task runs in its own process group, so a stop reaches whatever it started too, in its project's
+folder, never in the scheduler's Python environment (environment()); in the project's own, if it has
+one, by the `uv run` its command starts with (Task.in_project).
 
 Each run's command, as a line you can paste in a shell, its output and its exit code go to the run's
 output.log and, with ECHO, to the terminal the scheduler was started from, marked with the run.
@@ -23,6 +24,7 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 
 SETTLE_S = 1.0      # pause before each launch, so the previous task's screen and devices are released
 BIN = "Scripts" if sys.platform == "win32" else "bin"      # where a virtual env keeps its programs
+PASS_ON = ("uv", "timeout")     # programs that pass a stop on to the program they run (uv run, app())
 ECHO = True         # also show each run's command and output in the terminal
 
 if sys.platform == "win32":
@@ -32,7 +34,7 @@ if sys.platform == "win32":
         subprocess.Popen(["taskkill", *flags, "/T", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
 
-    def polite_stop(proc):
+    def polite_stop(proc, alone: bool = False):
         with suppress(OSError):
             proc.send_signal(signal.CTRL_BREAK_EVENT)    # console programs
         _taskkill(proc)                                   # GUI programs: like clicking the close button
@@ -42,26 +44,23 @@ if sys.platform == "win32":
 else:
     GROUP = {"start_new_session": True}
 
-    def polite_stop(proc):
+    def polite_stop(proc, alone: bool = False):
+        """SIGTERM to the task's process group; `alone`: to its first process only, one of PASS_ON, which
+        passes it on to what it runs (signalled as a group, that would get it twice)."""
         with suppress(ProcessLookupError):
-            os.killpg(proc.pid, signal.SIGTERM)
+            (os.kill if alone else os.killpg)(proc.pid, signal.SIGTERM)
 
     def force_kill(proc):
         with suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
 
 
-def environment(project: Path | None) -> dict[str, str]:
-    """The scheduler's environment variables without its own virtual env, plus the project's .venv
-    if it has one: what `source .venv/bin/activate` does, without a shell."""
+def environment() -> dict[str, str]:
+    """The scheduler's environment variables without its own virtual env, which a task must not run in
+    (uv run would even take it for the task's)."""
     env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT", "PYTHONHOME")}
     own = Path(sys.prefix, BIN) if sys.prefix != sys.base_prefix else None    # the scheduler's venv
-    path = [p for p in env.get("PATH", "").split(os.pathsep) if p and Path(p) != own]
-    venv = Path(project, ".venv") if project else None
-    if venv and venv.is_dir():
-        env["VIRTUAL_ENV"] = str(venv)
-        path.insert(0, str(venv / BIN))
-    env["PATH"] = os.pathsep.join(path)
+    env["PATH"] = os.pathsep.join(p for p in env.get("PATH", "").split(os.pathsep) if p and Path(p) != own)
     return env
 
 
@@ -84,13 +83,14 @@ class Launcher(QObject):
         """Run argv in the project's folder and environment (none: in outdir, in a plain environment)."""
         self._kill_timer.stop()                         # a pending kill was for the previous task
         self._proc, self._cancel, self._grace_s = None, threading.Event(), grace_s
+        self._alone = Path(argv[0]).name in PASS_ON     # it passes a stop on: signalled alone
         threading.Thread(target=self._run, args=(argv, Path(outdir), project, self._cancel), daemon=True).start()
 
     def stop(self):
         """Ask the task to stop, force-kill it after its grace period. Its exit is reported as usual."""
         self._cancel.set()                              # not launched yet: it never will be
         if self._proc is not None:
-            polite_stop(self._proc)
+            polite_stop(self._proc, self._alone)
         self._kill_timer.start(int(self._grace_s * 1000))
 
     def _force_kill(self):
@@ -101,7 +101,7 @@ class Launcher(QObject):
         if cancel.wait(SETTLE_S):
             return self._exited.emit(None)
         outdir.mkdir(parents=True, exist_ok=True)
-        env, folder = environment(project), Path(project or outdir)
+        env, folder = environment(), Path(project or outdir)
         program = shutil.which(argv[0], path=env["PATH"]) or argv[0]     # found in the task's environment
         with open(outdir / "output.log", "wb") as log:
             def report(text: str):                     # to output.log, and to the terminal
@@ -111,8 +111,7 @@ class Launcher(QObject):
                     sys.stderr.write(f"[{outdir.name}] {text}")
                     sys.stderr.flush()
 
-            venv = ". .venv/bin/activate && " if "VIRTUAL_ENV" in env else ""
-            report(f"[scheduler] $ (cd {shlex.quote(str(folder))} && {venv}{shlex.join(argv)})\n")
+            report(f"[scheduler] $ (cd {shlex.quote(str(folder))} && {shlex.join(argv)})\n")
             if program == argv[0] and not os.path.isabs(program):
                 report(f"[scheduler] {argv[0]} is not on the task's PATH\n")
             try:
