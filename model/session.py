@@ -290,14 +290,15 @@ class Session:
 
     # --- actions, called by the state machine --------------------------------------------------------
     def command(self, index: int) -> tuple[list[str], Path]:
-        """What run `index` executes: its command line, and its output folder."""
+        """What run `index` executes, run in its project's folder (else in the output folder): its command
+        line (in its project's Python environment: Task.in_project), and its output folder."""
         block, task = self.blocks[index], get_task(self.blocks[index].task)
         again = f"_{n}" if (n := self.times_played(index)) > 1 else ""         # a run played again: its own folder
         outdir = (self.session_dir / "blocks" / f"{index + 1:02d}_{task.key}{again}").absolute()  # tasks run elsewhere
         argv = task.argv(block.params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
                          subject=self.subject, session=f"ses-{self.session_number:02d}", ses=self.session_number,
                          before=self.blocks[:index])
-        return argv, outdir
+        return task.in_project(argv), outdir
 
     def queue(self, index: int):
         self.queued = index

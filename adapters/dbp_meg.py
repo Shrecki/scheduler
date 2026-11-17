@@ -48,7 +48,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from .go_adapter.go_lengths import LENGTHS, run_files, rows
+from .go_adapter.go_lengths import LENGTHS, protocol_s, run_files, rows
 from model.tasks import Category, Task
 import math
 
@@ -78,6 +78,11 @@ ARITHMETIC = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.m
 class GoTask(Task):
     """One program: its path, then its subject flag and the flags a block changes."""
     subject_flag: str = ""      # the flag that gets the session's subject ("s"), if it has one
+
+    def in_project(self, argv: list[str]) -> list[str]:
+        """A compiled program: run as it is, in its folder, never by uv (whatever Python environment
+        the folder holds)."""
+        return list(argv)
 
     def run_number(self, before: list) -> int:
         """For run "next": 1 + the highest run of the earlier blocks of this task, so blocks left on

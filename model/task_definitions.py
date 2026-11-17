@@ -3,10 +3,11 @@
 A task is a command to run (tasks.py says how to write one). A real task looks like:
     Task("mot", "MOT", Category.COGNITIVE_TASK, ("python", "run.py", "--speed", "{speed}", "--out", "{outdir}"),
          {"speed": 4.0}, project=Path.home() / "mot")
-`project`: it runs in that folder, with the folder's .venv activated, never in the scheduler's environment.
+`project`: it runs in that folder, in the folder's Python environment if it has one (.venv, by uv:
+tasks.py, Task.in_project), never in the scheduler's; a session script runs it the same way.
 
-DUMMY TASKS: small programs that come with Ubuntu, standing in for the real tasks. `timeout` ends
-each one after the block's planned duration (exit code 124), as a real task would end itself.
+DUMMY TASKS: small programs that come with Ubuntu, standing in for the real tasks. app()'s `timeout`
+ends each one after the block's planned duration (exit code 124), as a real task would end itself.
 Missing a program? sudo apt install gnome-sudoku gnome-mines gnome-chess aisleriot eog
 """
 

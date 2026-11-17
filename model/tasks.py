@@ -3,9 +3,10 @@
 Command placeholders: every parameter by name, plus {duration_s}, {outdir}, {subject}, {session}.
 A True/False parameter is written {name:--flag}: the flag when it is on, nothing when it is off.
 
-A task that belongs to a project of its own sets `project`: it then runs in that folder, with the
-project's .venv activated if it has one (as `cd project && . .venv/bin/activate` would), so its
-command can call the project's programs directly. Tasks never run in the scheduler's own environment.
+A task that belongs to a project of its own sets `project`: it then runs in that folder and, if the
+project has a Python environment (.venv), in it, by uv (Task.in_project: uv run --directory project),
+so its command can call the project's programs directly. The scheduler runs exactly that, and a session
+script writes it. Tasks never run in the scheduler's own environment.
 """
 
 import sys
@@ -39,7 +40,7 @@ class Task:
     params: dict = field(default_factory=dict)   # name: default value, or a tuple of choices (first = default)
     duration_s: float = 15 * 60
     stop_grace_s: float = 5.0         # after a stop request, force-kill after this long
-    project: Path | str | None = None   # its own project folder: runs there, in the project's .venv
+    project: Path | str | None = None   # its own project folder: runs there, in its Python environment (in_project)
 
     def defaults(self) -> dict:
         return {name: v[0] if isinstance(v, tuple) else v for name, v in self.params.items()}
@@ -76,6 +77,17 @@ class Task:
         values = {name: Switch(v) if isinstance(v, bool) else v for name, v in values.items()}
         return [arg for part in self.command if (arg := part.format(**values))]
 
+    def in_project(self, argv: list[str]) -> list[str]:
+        """argv as it runs, the same for the scheduler and a session script: if its project has a Python
+        environment (.venv), by uv in it, as it is (no sync: nothing installed or updated; --no-sync is
+        for a uv project, with a pyproject.toml): uv run --directory PROJECT [--no-sync] argv. Else as it
+        is, run in the project's folder."""
+        project = Path(self.project).expanduser() if self.project else None
+        if project is None or not (project / ".venv").is_dir():
+            return list(argv)
+        sync = ["--no-sync"] if (project / "pyproject.toml").is_file() else []
+        return ["uv", "run", "--directory", str(project), *sync, *argv]
+
 
 class Switch:
     """A True/False parameter in a command: "{name:--flag}" is the flag when on, nothing when off."""
@@ -89,9 +101,11 @@ class Switch:
 
 # --- helpers for writing commands ----------------------------------------------------------------
 def app(*command: str) -> tuple[str, ...]:
-    """A program ended by `timeout` after the block's duration (exit code 124).
+    """A program ended by `timeout` after the block's duration (exit code 124). --foreground: timeout
+    stays in the task's process group (else it makes one of its own, which a force-kill would miss when
+    uv runs it), and ends the program it runs, not that program's own children.
     Games are named by full path: Ubuntu keeps them in /usr/games, which not every PATH includes."""
-    return ("timeout", "{duration_s}", *command)
+    return ("timeout", "--foreground", "{duration_s}", *command)
 
 
 def fake(key: str, *args: str) -> tuple[str, ...]:

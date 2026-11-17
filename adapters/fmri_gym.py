@@ -19,15 +19,19 @@ gives its script format to the session (SessionScripts(...)).
     SUBJECT=sub-01
     RIG=configs/examples/rigs/laptop.json
     SES=${1:-002}
-    (cd "$FMRI_GYM_PATH" && uv run fmri-play --curriculum configs/curricula/coom/all.json --subject "$SUBJECT" --ses "$SES" --run 1 --rig "$RIG" --duration 60 --loop --resume)
-    mkdir -p "$SESSION_DIR/blocks/02_mtb" && (cd "$DBP_MTB_PATH" && . .venv/bin/activate && python run.py ...)  # scheduler: {...}
+    #RUN
+    uv run --directory "$FMRI_GYM_PATH" --no-sync fmri-play --curriculum configs/curricula/coom/all.json --subject "$SUBJECT" --ses "$SES" --run 1 --rig "$RIG" --duration 60 --loop --resume
+    mkdir -p "$SESSION_DIR/blocks/02_mtb" && uv run --directory "$DBP_MTB_PATH" --no-sync python run.py ...  # scheduler: {...}
+    mkdir -p "$SESSION_DIR/blocks/03_meg_arc" && (cd "$DBP_MEG_PATH" && "$DBP_MEG_PATH/bin/MEG-ARC" -s=01)  # scheduler: {...}
 
   One line per run, each run in its own folder, so that any line can be run on its own. The folders
   are set once at the top, by the names task_definitions.py gives them: to share the script, change
-  those lines. A game is written as fmri-gym writes it, behind its `cd`. Any other run is written as
-  what the scheduler runs, in its folder and environment, followed by a comment the shell ignores,
+  those lines. Each run is written as the scheduler runs it (Session.command: by uv in its project's
+  Python environment, Task.in_project; else in its folder, after a `cd`), with the session's
+  $SUBJECT, $SES and $RIG in a game's line; any other run is followed by a comment the shell ignores,
   from which read() gets the run back as it was. Read back, a line that is neither becomes a
-  ScriptLine run. Commented-out runs are left out. Older scripts (one `cd` line of its own) read too.
+  ScriptLine run (run by the shell, in fmri-gym's folder). Commented-out runs are left out. Older
+  scripts ((cd ... && ...) lines, or one `cd` line of its own) read too.
 """
 
 import argparse
@@ -79,7 +83,10 @@ class GymTask(Task):
 @dataclass(frozen=True)
 class ScriptLine(Task):
     """A line of a session script that is no fmri-play run, run as the script runs it: in the fmri-gym
-    folder, with $SUBJECT, $SES and $RIG set."""
+    folder, with $SUBJECT, $SES and $RIG set, by the shell (not in fmri-gym's Python environment)."""
+
+    def in_project(self, argv: list[str]) -> list[str]:
+        return list(argv)
 
     def argv(self, params: dict, **context) -> list[str]:
         p = {**self.defaults(), **params}
@@ -156,13 +163,14 @@ ASSIGN = re.compile(r"([A-Za-z_]\w*)=(.*)")
 PINNED = re.compile(r"\$\{1:-(\d+)\}")              # SES=${1:-002}
 RUNS_FROM = "#RUN"           # between the setup lines and the first run (fmri-gym's editor saves it as "# RUN")
 
+
 class SessionScripts:
     """fmri-gym's session scripts: write(session) -> text, read(text) -> (design, note).
     `tasks`: all the tasks (task_definitions.TASKS), which a script's lines are read back as.
     `paths`: folders by name (task_definitions.PATHS; by default `root` as FMRI_GYM_PATH): a script sets
     those it uses at its top, with SESSION_DIR (the session's data folder), and its lines use them.
 
-    Each line plays one run on its own, in its folder: (cd "$FMRI_GYM_PATH" && uv run fmri-play ...).
+    Each line plays one run on its own, as the scheduler plays it: uv run --directory "$FMRI_GYM_PATH" ...
     fmri-gym's session editor reads those as commands; it edits only lines that start with uv run fmri-play."""
 
     def __init__(self, root: Path | str, tasks: list[Task], rig: str = DEFAULT_RIG, paths: dict | None = None):
@@ -185,21 +193,20 @@ class SessionScripts:
             task = self._task(block.task)
             if isinstance(task, GymTask):
                 p = {**task.defaults(), **block.params}
-                words = [*PLAY, *task.play(p, '"$SUBJECT"', '"$SES"', task.run_number(p, session.blocks[:i]),
-                                           '"$RIG"' if p["rig"] == rig else f"configs/{p['rig']}",
-                                           block.duration_ms / 1000)]
-                play = " ".join(w if w in HEAD_VARS else shlex.quote(w) for w in words)
-                lines.append(f"(cd {word(str(self.root))} && {play})")
+                words = task.in_project(["fmri-play", *task.play(p, '"$SUBJECT"', '"$SES"', task.run_number(p, session.blocks[:i]),
+                                                                 '"$RIG"' if p["rig"] == rig else f"configs/{p['rig']}",
+                                                                 block.duration_ms / 1000)])
+                lines.append(" ".join(w if w in HEAD_VARS else word(w) for w in words))   # as GymTask.argv, with the variables
             else:
                 params = dict(block.params)
-                if isinstance(task, ScriptLine):         # as typed, in fmri-gym's folder
+                if isinstance(task, ScriptLine):         # as typed, in fmri-gym's folder, by the shell
                     line = f"(cd {word(str(self.root))} && {params.pop('command')})"
-                else:
+                else:                                    # what the scheduler runs (Session.command)
                     argv, outdir = session.command(i)
-                    folder = Path(task.project or outdir).absolute()
-                    venv = ". .venv/bin/activate && " if (folder / ".venv").is_dir() else ""
-                    line = (f"mkdir -p {word(str(outdir))} && "
-                            f"(cd {word(str(folder))} && {venv}{' '.join(word(w) for w in argv)})")
+                    command = " ".join(word(w) for w in argv)
+                    if argv[:2] != ["uv", "run"]:            # uv run --directory: in its folder already
+                        command = f"(cd {word(str(Path(task.project or outdir).absolute()))} && {command})"
+                    line = f"mkdir -p {word(str(outdir))} && {command}"
                 mark = {"task": task.key, "duration_s": block.duration_ms / 1000, "parameters": params}
                 lines.append(f"{line}  {MARK} {json.dumps(mark)}")
         head = [*HEADER, *(f"{name}={shlex.quote(str(path))}" for name, path in paths.items() if name in used),
@@ -329,9 +336,18 @@ for _name, _flag in SWITCHES:
     FLAGS.add_argument(_flag, dest=_name, action="store_true")
 
 
+UV_VALUED = {"--directory", "--project", "--python", "-p", "--with", "--env-file", "--package", "--extra", "--group"}
+
+
 def _play_args(words: list[str], values: dict) -> argparse.Namespace | None:
-    """fmri-play's arguments, if the words play one run (`uv run fmri-play ...` or `fmri-play ...`)."""
+    """fmri-play's arguments, if the words play one run (`uv run [uv's options] fmri-play ...` or
+    `fmri-play ...`)."""
     words = [_expand(word, values) for word in words]
+    if words[:2] == PLAY[:2]:                       # uv's own options come before the command
+        rest = words[2:]
+        while rest and rest[0].startswith("-"):
+            rest = rest[2:] if rest[0] in UV_VALUED else rest[1:]
+        words = [*PLAY[:2], *rest]
     for prefix in (PLAY, PLAY[2:]):
         if words[:len(prefix)] == prefix:
             try:

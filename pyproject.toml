@@ -1,0 +1,8 @@
+[project]
+name = "Scheduler"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6>=6.6",
+    "python-statemachine>=3.2"
+]
