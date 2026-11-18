@@ -3,6 +3,8 @@ the model: state-machine events, or the model's update methods. It never updates
 
 from PySide6.QtCore import QTimer
 
+from view.report import write_pdf
+
 
 class Controller:
     TICK_MS = 200       # clock refresh, and how often the session time is checked
@@ -22,10 +24,9 @@ class Controller:
         view.taskChosen.connect(self.session.set_task)
         view.paramChanged.connect(self.session.set_param)
         view.durationChanged.connect(self.session.set_duration)
-        view.loadDesign.connect(self.session.load_design)
-        view.saveDesign.connect(self.session.save_design)
-        view.exportScript.connect(self.session.save_script)
-        view.importScript.connect(self.session.load_script)
+        view.loadDesign.connect(self.session.load)
+        view.saveDesign.connect(self.session.save)
+        view.exportPdf.connect(lambda path: self.session.save_report(path, write_pdf))
         view.templateFolderChosen.connect(self.session.scan_templates)
         view.templateDropped.connect(self.session.add_template)
         view.templateReplaced.connect(self.session.load_template)

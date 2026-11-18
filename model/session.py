@@ -157,7 +157,8 @@ class Session:
         if self.in_state("finalize") or ms <= max(self.used_ms(), 0):
             return
         self.total_ms = int(ms)
-        self.notice = f"Session length: {_mmss(ms)}"
+        if self.in_state("design"):                     # while recording, the clock shows it
+            self.notice = f"Session length: {_mmss(ms)}"
         self.notify()
 
     def set_task(self, index: int, key: str):
@@ -329,7 +330,10 @@ class Session:
         """Launch the block clicked, or else the one after the farthest played."""
         index = self.farthest + 1 if self.queued is None else self.queued
         self.index, self.farthest, self.queued = index, max(self.farthest, index), None
-        self.plays.append(Play(index, dict(self.current.params)))
+        params = dict(self.current.params)
+        if params.get("rig") == SESSION_RIG:            # recorded as played: with the session's rig then
+            params["rig"] = self.rig
+        self.plays.append(Play(index, params))
         argv, outdir = self.command(index)
         task = get_task(self.current.task)
         self.processes.spawn(argv, outdir, task.stop_grace_s, task.project)
@@ -340,7 +344,7 @@ class Session:
             block.started_at, block.ended_at, block.exit_code = self.plays[-1].started_at, None, None
 
     def start_recording(self):
-        self.rec_start, self.rec_start_wall = now_ms(), datetime.now()
+        self.rec_start, self.rec_start_wall, self.notice = now_ms(), datetime.now(), ""    # the design's notices end
         self.save_records()
 
     def mark_exited(self, exit_code):
@@ -362,6 +366,31 @@ class Session:
                 "runs": [{"category": b.category.name, "task": b.task, "duration_s": b.duration_ms / 1000,
                           "parameters": b.params} for b in self.blocks]}
 
+    def save(self, path: str | Path):
+        """The design under one name, `path` with or without .json or .sh: <name>.json, the design, and
+        (given a session-script format) <name>.sh, the session script. load() reads back either."""
+        path = Path(path)
+        base = path.with_suffix("") if path.suffix in (".json", ".sh") else path
+        files = [(base.with_name(base.name + ".json"), lambda: json.dumps(self.design(), indent=2))]
+        if self.scripts is not None:
+            files.append((base.with_name(base.name + ".sh"), lambda: self.scripts.write(self)))
+        try:
+            for file, text in files:
+                write(file, text())
+            if self.scripts is not None:
+                files[-1][0].chmod(0o755)
+            self.notice = f"Saved {' and '.join(file.name for file, _ in files)}"
+        except OSError as exc:
+            self.notice = f"Could not save {file.name}: {exc}"
+        self.notify()
+
+    def load(self, path: str | Path):
+        """Replace the runs with a design (.json) or a session script (.sh), told apart by the extension."""
+        if Path(path).suffix == ".sh" and self.scripts is not None:
+            self.load_script(path)
+        else:
+            self.load_design(path)
+
     def save_design(self, path: str | Path):
         try:
             write(path, json.dumps(self.design(), indent=2))
@@ -375,6 +404,15 @@ class Session:
         try:
             write(path, self.scripts.write(self))
             Path(path).chmod(0o755)
+            self.notice = f"Exported {Path(path).name}"
+        except OSError as exc:
+            self.notice = f"Could not export {Path(path).name}: {exc}"
+        self.notify()
+
+    def save_report(self, path: str | Path, draw):
+        """The session drawn into a file by `draw(session, path)` (the view's PDF), reported like any export."""
+        try:
+            draw(self, path)
             self.notice = f"Exported {Path(path).name}"
         except OSError as exc:
             self.notice = f"Could not export {Path(path).name}: {exc}"

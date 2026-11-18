@@ -1,6 +1,8 @@
 """The main window. It reads the session to draw itself (refresh), and reports what the user asks for
 as signals. It never changes the session or the state machine itself."""
 
+from pathlib import Path
+
 from PySide6.QtCore import QEvent, QPoint, QRegularExpression, Qt, Signal
 from PySide6.QtGui import QRegularExpressionValidator
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
@@ -110,10 +112,9 @@ class MainWindow(QMainWindow):
     taskChosen = Signal(int, str)             # run index, task key
     paramChanged = Signal(int, str, object)   # run index, parameter name, value
     durationChanged = Signal(int, int)        # run index, ms
-    loadDesign = Signal(str)                  # file path
-    saveDesign = Signal(str)
-    exportScript = Signal(str)
-    importScript = Signal(str)
+    loadDesign = Signal(str)                  # file path: a design (.json) or a session script (.sh)
+    saveDesign = Signal(str)                  # file path: saved as a design (.json) and a session script (.sh)
+    exportPdf = Signal(str)                   # file path: the session drawn as a PDF
     strictToggled = Signal(bool)              # on: at the end time, stop the run playing
     totalChanged = Signal(int)                # the session's length, in ms
     autoplayToggled = Signal(bool)
@@ -159,14 +160,19 @@ class MainWindow(QMainWindow):
                                 "the session ends.\nOff: a run playing at the end time goes on until it ends by "
                                 "itself; no other run starts after it.")
         self.strict.toggled.connect(self.strictToggled)
-        self.load, self.save = QPushButton("Load design…"), QPushButton("Save design…")
-        self.load.clicked.connect(lambda: self.ask_file(QFileDialog.getOpenFileName, self.loadDesign))
-        self.save.clicked.connect(lambda: self.ask_file(QFileDialog.getSaveFileName, self.saveDesign))
-        self.export, self.import_ = QPushButton("Export script…"), QPushButton("Import script…")
-        self.export.clicked.connect(lambda: self.ask_file(QFileDialog.getSaveFileName, self.exportScript,
-                                                          "Session script", ".sh"))
-        self.import_.clicked.connect(lambda: self.ask_file(QFileDialog.getOpenFileName, self.importScript,
-                                                           "Session script", ".sh"))
+        scripts = self.session.scripts is not None                   # a session-script format: .sh too
+        patterns = "*.json *.sh" if scripts else "*.json"
+        self.load = QPushButton("Load design…", toolTip="Replaces the runs with a design (.json)"
+                                + (" or a session script (.sh)" if scripts else "") + ".")
+        self.save = QPushButton("Save design…", toolTip="Saves the design under the name you give: <name>.json, to "
+                                "load again or use as a template" + (",\nand <name>.sh, the session script, which "
+                                                                     "runs the session as is" if scripts else "") + ".")
+        self.load.clicked.connect(lambda: self.ask_file(QFileDialog.getOpenFileName, self.loadDesign, patterns))
+        self.save.clicked.connect(lambda: self.ask_file(QFileDialog.getSaveFileName, self.saveDesign, patterns))
+        self.pdf = QPushButton("Export PDF…", toolTip="The session on paper: its timeline (as planned and, once "
+                               "recorded, as played),\nthe time per category, and every run with its parameters.")
+        self.pdf.clicked.connect(lambda: self.ask_file(QFileDialog.getSaveFileName, self.exportPdf, "*.pdf",
+                                                       "PDF", ".pdf", self.pdf_path()))
         for button, signal in ((self.mode, self.modeToggled), (self.start, self.startClicked),
                                (self.skip, self.skipClicked), (self.stop, self.stopClicked)):
             button.clicked.connect(signal)
@@ -208,7 +214,7 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.message, 1)
         bottom.addWidget(self.strict)
         bottom.addWidget(self.autoplay)
-        for button in (self.load, self.save, self.import_, self.export, self.mode, self.stop, self.skip, self.start):
+        for button in (self.load, self.save, self.pdf, self.mode, self.stop, self.skip, self.start):
             bottom.addWidget(button)
         central = QWidget()
         page = QVBoxLayout(central)
@@ -219,10 +225,16 @@ class MainWindow(QMainWindow):
 
         self.session.observers.append(self.refresh)
 
-    def ask_file(self, dialog, signal, kind="Session design", suffix=".json"):
-        path, _ = dialog(self, kind, str(self.session.data_root), f"{kind} (*{suffix})")
+    def ask_file(self, dialog, signal, patterns: str, kind="Session design", suffix="", start=None):
+        """Ask for a file (`patterns`: "*.json *.sh"); report its path, ending in `suffix` if one is given."""
+        path, _ = dialog(self, kind, str(start or self.session.data_root), f"{kind} ({patterns})")
         if path:
             signal.emit(path if path.endswith(suffix) else path + suffix)
+
+    def pdf_path(self) -> Path:
+        """Where a PDF is offered first: in the session's folder, once it has one."""
+        s = self.session
+        return (s.session_dir if s.session_dir.is_dir() else s.data_root) / f"{s.prefix.name}_timeline.pdf"
 
     def template_folder(self) -> str | None:
         """The template folder chosen at the last launch, if any."""
@@ -268,8 +280,10 @@ class MainWindow(QMainWindow):
         self.total.show_total(s.total_ms, editable=not state("finalize"), minimum=s.used_ms() if s.rec_start else 0)
 
         ended = [p for p in s.plays if p.ended_at]
-        if not ended:
-            self.message.setText(s.notice if state("design") else "")
+        if state("design") or state("finalize") and s.notice:     # the design's notices; at the end, exports
+            self.message.setText(s.notice)
+        elif not ended:
+            self.message.setText("")
         elif ended[-1].started_at is None and ended[-1].exit_code is None:
             self.message.setText(f"run-{ended[-1].index + 1:02d} could not be launched: see its output.log")
         else:
@@ -280,8 +294,8 @@ class MainWindow(QMainWindow):
         self.templates.refresh()
         self.load.setVisible(state("design"))
         self.save.setVisible(state("design"))
-        self.export.setVisible(state("design") and s.scripts is not None)
-        self.import_.setVisible(state("design") and s.scripts is not None)
+        self.pdf.setVisible(state("design") or state("finalize"))
+        self.pdf.setEnabled(s.has_blocks())
         self.mode.setVisible(state("design") or state("execute"))
         self.autoplay.setVisible(state("execute") or state("recording"))
         self.strict.setVisible(not state("finalize"))

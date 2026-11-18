@@ -1,0 +1,348 @@
+{
+  "total_s": 6300.0,
+  "timeline_mode": "TOTAL_RECORDING_TIME",
+  "strict": true,
+  "rig": "examples/rigs/laptop.json",
+  "runs": [
+    {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 120.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
+      "category": "LOCALIZER_MEG",
+      "task": "meg_eye_movements",
+      "duration_s": 359.806,
+      "parameters": {
+        "autostart": false,
+        "blocks": "saccades,lines,circles,sines",
+        "bridge": "127.0.0.1:5010",
+        "button-device": "",
+        "circle-cycles": 3,
+        "edf": "em<SUBJECT>.edf",
+        "eyelink-record": false,
+        "fix-cross": true,
+        "lines-repeats": 2,
+        "pursuit-amplitude-deg": 0.0,
+        "pursuit-fix-ms": 500,
+        "pursuit-hold-ms": 200,
+        "pursuit-speed-deg": 10.0,
+        "sacc-dwell-max-ms": 1500,
+        "sacc-dwell-min-ms": 1000,
+        "sacc-grid-scale": 0.7,
+        "sacc-passes": 6,
+        "seed": 1,
+        "sine-cycles": 8,
+        "sine-freq-hz": 0.25,
+        "tracker-host": ""
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_arc",
+      "duration_s": 400.642,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fb": 350,
+        "lead-in": 2000,
+        "lead-out": 5000,
+        "max-rt": 10000,
+        "n": 0,
+        "run": "next",
+        "run-fb": 10000,
+        "train": 5000,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 120.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_baba_auto",
+      "duration_s": 900.0,
+      "parameters": {
+        "curriculum": "all-GMPD3-ABXY-nav",
+        "rig": "session rig",
+        "play_to_end": false,
+        "loop": false,
+        "resume": true,
+        "dummy_trigger": false,
+        "skip_load_games": false
+      }
+    },
+    {
+      "category": "LOCALIZER_MEG",
+      "task": "meg_motor_localizer",
+      "duration_s": 408.0,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "circle-deg": 6.0,
+        "circle-line-px": 20.0,
+        "conditions": "feet,tongue,left,right",
+        "cue": 5000,
+        "move": 15000,
+        "reps": 3,
+        "rest": 10000,
+        "rest-max": 12000,
+        "run": 1,
+        "seed": 1,
+        "text-deg": 0.85,
+        "toggle": 1000,
+        "toggle-fingers": 125,
+        "wait-trigger": false,
+        "wrap-deg": 12.0
+      }
+    },
+    {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 120.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "wisconsin_card_sorting_task",
+      "duration_s": 511.4,
+      "parameters": {
+        "all-cards": false,
+        "autostart": false,
+        "button-device": "",
+        "fb": 800,
+        "fb-delay": 600,
+        "fb-delay-max": 1000,
+        "iti": 800,
+        "iti-max": 1200,
+        "max_duration": "",
+        "maxrun": 10,
+        "minrun": 6,
+        "mouse": false,
+        "n": 128,
+        "resp-keys": "1,2,3,4",
+        "seed": 1,
+        "soa": 0,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "LOCALIZER_MEG",
+      "task": "meg_retinotopy",
+      "duration_s": 155.029,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fullfield": false,
+        "habituation": 20,
+        "max-ecc": 8.4,
+        "p": 467,
+        "seed": 1,
+        "shift": 0,
+        "sound-gap-max": 12.0,
+        "sound-gap-min": 8.0,
+        "trials": 0,
+        "verify": false,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_spatial_working_memory",
+      "duration_s": 437.0,
+      "parameters": {
+        "answer-offset-deg": 3.5,
+        "autostart": false,
+        "button-device": "",
+        "delay": 1000,
+        "delay-max": 1500,
+        "fb": 500,
+        "fb-delay": 600,
+        "fb-delay-max": 1000,
+        "iti": 1000,
+        "iti-max": 1500,
+        "max-rt": 2000,
+        "n": 40,
+        "pre": 500,
+        "run": 1,
+        "seed": 1,
+        "square-deg": 1.2,
+        "step": 1000,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 120.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
+      "category": "LOCALIZER_MEG",
+      "task": "meg_eye_movements",
+      "duration_s": 359.806,
+      "parameters": {
+        "autostart": false,
+        "blocks": "saccades,lines,circles,sines",
+        "bridge": "127.0.0.1:5010",
+        "button-device": "",
+        "circle-cycles": 3,
+        "edf": "em<SUBJECT>.edf",
+        "eyelink-record": false,
+        "fix-cross": true,
+        "lines-repeats": 2,
+        "pursuit-amplitude-deg": 0.0,
+        "pursuit-fix-ms": 500,
+        "pursuit-hold-ms": 200,
+        "pursuit-speed-deg": 10.0,
+        "sacc-dwell-max-ms": 1500,
+        "sacc-dwell-min-ms": 1000,
+        "sacc-grid-scale": 0.7,
+        "sacc-passes": 6,
+        "seed": 1,
+        "sine-cycles": 8,
+        "sine-freq-hz": 0.25,
+        "tracker-host": ""
+      }
+    },
+    {
+      "category": "COGNITIVE_TASK_MEG",
+      "task": "meg_reading_sentences",
+      "duration_s": 545.0,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "fontsize": 72,
+        "nruns": 4,
+        "practice": false,
+        "practice-n": 5,
+        "run": 1,
+        "seed": 1,
+        "trigger": "t",
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_aigamestore",
+      "duration_s": 600.0,
+      "parameters": {
+        "curriculum": "game1-GMPD3-ABXY-nav",
+        "rig": "session rig",
+        "play_to_end": false,
+        "loop": false,
+        "resume": true,
+        "dummy_trigger": false,
+        "skip_load_games": false
+      }
+    },
+    {
+      "category": "LOCALIZER_MEG",
+      "task": "meg_motor_localizer",
+      "duration_s": 408.0,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "circle-deg": 6.0,
+        "circle-line-px": 20.0,
+        "conditions": "feet,tongue,left,right",
+        "cue": 5000,
+        "move": 15000,
+        "reps": 3,
+        "rest": 10000,
+        "rest-max": 12000,
+        "run": 1,
+        "seed": 1,
+        "text-deg": 0.85,
+        "toggle": 1000,
+        "toggle-fingers": 125,
+        "wait-trigger": false,
+        "wrap-deg": 12.0
+      }
+    },
+    {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 120.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
+      "category": "LOCALIZER_MEG",
+      "task": "meg_left_right",
+      "duration_s": 205.0,
+      "parameters": {
+        "autostart": false,
+        "button-device": "",
+        "duration": 180.0,
+        "seed": 1,
+        "wait-trigger": false
+      }
+    },
+    {
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_rushhour",
+      "duration_s": 900.0,
+      "parameters": {
+        "curriculum": "all",
+        "rig": "session rig",
+        "play_to_end": false,
+        "loop": false,
+        "resume": true,
+        "dummy_trigger": false,
+        "skip_load_games": false
+      }
+    },
+    {
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_aigamestore",
+      "duration_s": 600.0,
+      "parameters": {
+        "curriculum": "game4-GMPD3-ABXY-nav",
+        "rig": "session rig",
+        "play_to_end": false,
+        "loop": false,
+        "resume": false,
+        "dummy_trigger": false,
+        "skip_load_games": false
+      }
+    },
+    {
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_aigamestore",
+      "duration_s": 600.0,
+      "parameters": {
+        "curriculum": "game7-GMPD3-ABXY-nav",
+        "rig": "session rig",
+        "play_to_end": false,
+        "loop": false,
+        "resume": false,
+        "dummy_trigger": false,
+        "skip_load_games": false
+      }
+    }
+  ]
+}
