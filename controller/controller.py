@@ -32,6 +32,7 @@ class Controller:
         view.autoplayToggled.connect(self.set_autoplay)
         view.strictToggled.connect(self.session.set_strict)
         view.totalChanged.connect(self.session.set_total)
+        view.rigChosen.connect(self.session.set_rig)
         view.playRequested.connect(lambda index: sm.play(index=index))
         launcher.launched.connect(sm.launched)
         launcher.exited.connect(lambda code: sm.process_exited(exit_code=code))
@@ -45,6 +46,8 @@ class Controller:
         self.sm.validate()
         if folder := self.view.template_folder():   # the template library of the last launch
             self.session.scan_templates(folder)
+        if rig := self.view.saved_rig():            # this computer's rig, chosen at an earlier launch
+            self.session.set_rig(rig)
         if info.previous:                       # session 02+: start from the previous session's design
             self.session.load_design(info.previous)
         self.view.show()

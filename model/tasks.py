@@ -2,6 +2,9 @@
 
 Command placeholders: every parameter by name, plus {duration_s}, {outdir}, {subject}, {session}.
 A True/False parameter is written {name:--flag}: the flag when it is on, nothing when it is off.
+A parameter "rig" whose choices start with SESSION_RIG (task_definitions' RIG) follows the rig chosen
+above the timeline (Session.rig), unless the block picks another: {rig} is its name under the rigs
+folder ("examples/rigs/laptop.json"), {rig_file} its file.
 
 A task that belongs to a project of its own sets `project`: it then runs in that folder and, if the
 project has a Python environment (.venv), in it, by uv (Task.in_project: uv run --directory project),
@@ -16,6 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 NEXT = "next"   # a "run" choice: the run after this task's earlier runs in the session (Task.next_run)
+SESSION_RIG = "session rig"     # a "rig" choice: the rig chosen above the timeline (Session.rig)
 
 
 

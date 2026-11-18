@@ -3,7 +3,7 @@ as signals. It never changes the session or the state machine itself."""
 
 from PySide6.QtCore import QEvent, QPoint, QRegularExpression, Qt, Signal
 from PySide6.QtGui import QRegularExpressionValidator
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
                                QPushButton, QSizePolicy, QStackedWidget, QToolTip, QVBoxLayout, QWidget)
 
 from model.session import TimelineMode
@@ -11,7 +11,9 @@ from .blocks import Palette, fmt
 from .composition import Composition
 from .timeline import Timeline
 from .session_dialog import SessionDialog
-from .templates import TemplatePanel, saved_folder
+from .templates import TemplatePanel, saved_folder, settings
+
+RIG_KEY = "rig"     # QSettings: the rig chosen last on this computer
 
 
 def set_level(widget: QWidget, level: str):
@@ -122,6 +124,7 @@ class MainWindow(QMainWindow):
     templateFolderChosen = Signal(str)        # folder path: read its templates
     templateDropped = Signal(int, int)        # template number, insert its runs before this run (-1: at the end)
     templateReplaced = Signal(int)            # template number: the design replaced with it
+    rigChosen = Signal(str)                   # rig name: the rig of every run on "session rig"
 
     def __init__(self, sm):
         super().__init__(windowTitle="Block scheduler")
@@ -132,6 +135,15 @@ class MainWindow(QMainWindow):
         self.clock = QLabel(objectName="title")
         self.total = TotalEdit()
         self.total.changed.connect(self.totalChanged)
+        self.rig = QComboBox(toolTip="The rig of every run on \"session rig\" (fmri-gym's rig files): its screen, "
+                             "trigger and devices.\nA run can pick another in its card. Remembered on this computer.")
+        self.rig.addItems(self.session.rigs)
+        self.rig.textActivated.connect(self.choose_rig)
+        self.rig_box = QWidget()
+        rig_row = QHBoxLayout(self.rig_box)
+        rig_row.setContentsMargins(0, 0, 24, 0)
+        rig_row.addWidget(QLabel("Rig", objectName="hint"))
+        rig_row.addWidget(self.rig)
         self.timeline, self.palette = Timeline(self.session), Palette()
         self.templates = TemplatePanel(self.session)
         self.composition = Composition(self.session)
@@ -180,6 +192,7 @@ class MainWindow(QMainWindow):
         titles.addWidget(self.title)
         top = QHBoxLayout(header)
         top.addLayout(titles, 1)
+        top.addWidget(self.rig_box)
         top.addWidget(self.clock)
         top.addWidget(self.total)
         column = QVBoxLayout()
@@ -214,6 +227,15 @@ class MainWindow(QMainWindow):
     def template_folder(self) -> str | None:
         """The template folder chosen at the last launch, if any."""
         return saved_folder()
+
+    def choose_rig(self, name: str):
+        """A rig chosen above the timeline: remembered on this computer, and reported."""
+        settings().setValue(RIG_KEY, name)
+        self.rigChosen.emit(name)
+
+    def saved_rig(self) -> str | None:
+        """The rig chosen last on this computer, if any."""
+        return settings().value(RIG_KEY) or None
 
     def ask_session(self, data_root):
         dialog = SessionDialog(data_root)
@@ -263,6 +285,8 @@ class MainWindow(QMainWindow):
         self.mode.setVisible(state("design") or state("execute"))
         self.autoplay.setVisible(state("execute") or state("recording"))
         self.strict.setVisible(not state("finalize"))
+        self.rig_box.setVisible(bool(s.rigs) and not state("finalize"))
+        self.rig.setCurrentText(s.rig)
         for box, value in ((self.autoplay, s.autoplay), (self.strict, s.strict)):
             box.blockSignals(True)                  # show the session's value without reporting it back
             box.setChecked(value)

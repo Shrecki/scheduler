@@ -1,7 +1,20 @@
-"""
-This adapter is tailored to the DBP_fMRI codebase (Python-based).
-As is, the DBP_fMRI codebase is a repository of scripts, launched through [folder of task]/[task_name]_run.py --session [sessionNbr] --subject [subjectID] --run [runNbr].
-This adapter extracts the arguments from the run scripts from which to build the parameters of experimental blocks automatically.
+"""dbp_mri (DBP's fMRI cognitive tasks, in Python), seen from the scheduler: its tasks as tasks.
+
+dbp_mri runs every task through one script, run.py, which names them in its `task` argument:
+
+    python run.py ARC --run 01 --subject sub-07 --session ses-02 [--rig <rig file> --controls <controls file>]
+
+Nothing of dbp_mri is imported or run to find them: run.py's argparse options are read from its
+source, each one a block parameter or a value the session fills in (FILLED: --subject, --session), and
+each choice of its `task` argument (a positional with choices: ["ARC", "VCST", "WCST"]) is a task. Its
+module, <Folder>/<task>_run.py (ARC/arc_run.py, VCS/vcst_run.py, WCS/wcst_run.py), gives
+- its runs: "next" or one of the run numbers in its folder's file names (DBPfMRITask.run_number);
+- its planned duration: `length`, an expression the module's constants compute
+  ("MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION").
+Rig and controls: given fmri-gym's rig files (`rigs`, task_definitions' RIGS) and dbp_mri's controls/
+folder, a block passes --rig (the session's rig unless it picks another: the rig file) and --controls
+(its button mapping, one of controls/<task>*.json: arc.json, arc-GMPD3-ABXY-nav.json; the plainest
+first), which run.py takes both or neither. Without them, run.py keeps config.py's screen and keys.
 """
 
 import ast
@@ -12,10 +25,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from model.tasks import SESSION_RIG, Category, Task
 
-from model.tasks import Category, Task
-
-NEXT = "next"   # a run choice: the one after the earlier blocks' (see ScriptTask.run_number)
+NEXT = "next"   # a run choice: the one after the earlier blocks' (see DBPfMRITask.run_number)
 FILLED = {      # options the session fills in, by name: the scheduler's value they get
     "subject": "subject", "subj": "subject", "subj_id": "subject", "sub": "subject", "participant": "subject",
     "session": "session", "ses": "session",                       # as "ses-02"
@@ -26,10 +38,11 @@ SKIPPED = {"help", "version", "count", "store_const", "append_const"}   # action
 ARITHMETIC = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
               ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod}   # what a script's constants may use
 
+
 @dataclass(frozen=True)
 class DBPfMRITask(Task):
-    """One run script: python -m <folder>.<prefix>_run, followed by its options."""
-    options: tuple = ()     # (name, flag or "" for a positional, kind, filled-in field or ""), in the script's order
+    """One task of run.py: python run.py <TASK>, followed by its options."""
+    options: tuple = ()     # (name, flag or "" for a positional, kind, filled-in field or ""), in run.py's order
 
     def run_number(self, before: list) -> int:
         """For run "next": 1 + the highest run of the earlier blocks of this task, so blocks left on
@@ -48,7 +61,8 @@ class DBPfMRITask(Task):
             p["run"] = next((run for run in self.params["run"][1:] if int(run) == n), f"{n:02d}")
         words = list(self.command)
         for name, flag, kind, field in self.options:
-            value = context[field] if field else p[name]
+            value = (context[field] if field else context["rig_file"] if name == "rig"   # the block's rig (Session)
+                     else f"controls/{p[name]}.json" if name == "controls" else p[name])
             if kind in ("on", "off"):                       # store_true: the flag when ticked; store_false: when not
                 words += [flag] if bool(value) == (kind == "on") else []
             elif value not in ("", None):
@@ -57,48 +71,64 @@ class DBPfMRITask(Task):
         return words
 
 
-def dbp_mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI, duration_s: float = 300,
-                    durations: dict | None = None, length: str | tuple[str, ...] = (),
-                    startup_s: float = 0) -> list[Task]:
-    """The run scripts of a checkout, as it is now: one task per <folder>/<prefix>_run.py. None there: none.
+def dbp_fmri_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI, duration_s: float = 300,
+                     durations: dict | None = None, length: str | tuple[str, ...] = (), startup_s: float = 0,
+                     rigs: tuple[str, ...] = ()) -> list[Task]:
+    """The tasks of a dbp_mri checkout, as it is now: one per choice of run.py's `task` argument. No
+    run.py there: none.
 
-    Its key is the prefix in lower case ("vcst"), its label the folder's name ("VCST"; "WCST (wcst_meg)"
-    when the prefix is not the folder's name). `durations`: planned durations in seconds by key, for
-    the scripts that differ from `duration_s`.
+    Its key is the task's name in lower case ("vcst"), its label the name ("VCST"). `durations`:
+    planned durations in seconds by key, for the tasks whose `length` the constants cannot compute
+    (else `duration_s`); `startup_s` is added to each.
     """
     root = Path(root).expanduser()
-    scripts = sorted(p for p in root.glob("*/*_run.py") if not p.parent.name.startswith((".", "_")))
-    if not scripts:
-        print(f"run scripts: no <folder>/<prefix>_run.py in {root}: no tasks from it", file=sys.stderr)
+    try:
+        tree = ast.parse((root / "run.py").read_text(encoding="utf-8"), str(root / "run.py"))
+        options, params = _options(tree, _assigned(tree))
+    except (OSError, SyntaxError, ValueError) as exc:
+        print(f"dbp_mri: could not read {root / 'run.py'} ({exc}): no tasks from it", file=sys.stderr)
         return []
+    which = next((name for name, flag, _, _ in options if not flag and isinstance(params.get(name), tuple)), None)
+    if which is None:
+        print(f"dbp_mri: {root / 'run.py'} has no task argument (a positional with choices): no tasks", file=sys.stderr)
+        return []
+    names = [name for name in params.pop(which) if name]
+    options = [option for option in options if option[0] != which]       # the task's name: in its command
+    controls = sorted(p.stem for p in (root / "controls").glob("*.json"))
     tasks: list[Task] = []
-    for script in scripts:
-        folder, prefix = script.parent, script.stem.removesuffix("_run")
-        if not (folder.name.isidentifier() and script.stem.isidentifier()):
-            print(f"run scripts: {script.relative_to(root)} cannot be run with python -m (its name): left out",
-                  file=sys.stderr)
-            continue
+    for name in names:
+        key, task_params, task_options = name.lower(), dict(params), list(options)
+        module = next(iter(sorted(root.glob(f"*/{key}_run.py"))), None)
+        if "run" in task_params and not isinstance(task_params["run"], tuple) and module and (numbers := _run_numbers(module.parent)):
+            task_params["run"] = (NEXT, *numbers)
+        mine = sorted((c for c in controls if c == key or c.startswith(key + "-")), key=lambda c: (c != key, c.lower()))
+        if rigs and mine and {"rig", "controls"} <= set(task_params):
+            task_params.update(rig=(SESSION_RIG, *rigs), controls=tuple(mine))
+        else:                                               # both or neither: run.py's config.py instead
+            if rigs and {"rig", "controls"} <= set(task_params):
+                print(f"dbp_mri: no controls/{key}*.json at {root}: {name} runs without --rig", file=sys.stderr)
+            task_params = {n: v for n, v in task_params.items() if n not in ("rig", "controls")}
+            task_options = [o for o in task_options if o[0] not in ("rig", "controls")]
         try:
-            tree = ast.parse(script.read_text(encoding="utf-8"), str(script))
-            options, params = _options(tree)
-        except (OSError, SyntaxError, ValueError) as exc:
-            print(f"run scripts: could not read {script.relative_to(root)} ({exc}): left out", file=sys.stderr)
-            continue
-        if "run" in params and not isinstance(params["run"], tuple) and (numbers := _run_numbers(folder)):
-            params["run"] = (NEXT, *numbers)
-        key = prefix.lower()
-        label = folder.name if key == folder.name.lower() else f"{folder.name} ({prefix})"
-        command = ("python", "-m", f"{folder.name}.{script.stem}")
-        run_s = (durations or {}).get(key) or _length(tree, length) or duration_s
-        tasks.append(DBPfMRITask(key, label, category, command, params,
-                                duration_s=run_s + startup_s, project=root,
-                                options=tuple(options)))
+            run_s = (durations or {}).get(key) or (module and _length(ast.parse(module.read_text(encoding="utf-8")), length))
+        except (OSError, SyntaxError):
+            run_s = None
+        tasks.append(DBPfMRITask(key, name, category, ("python", "run.py", name), task_params,
+                                 duration_s=(run_s or duration_s) + startup_s, project=root, options=tuple(task_options)))
     return tasks
 
 
-def _options(tree: ast.Module) -> tuple[list, dict]:
+def _assigned(tree: ast.Module) -> dict:
+    """run.py's top-level names given a value written as is (tasks = ["ARC", "VCST", "WCST"])."""
+    return {node.targets[0].id: value for node in tree.body
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+            and (value := _literal(node.value)) is not None}
+
+
+def _options(tree: ast.Module, known: dict | None = None) -> tuple[list, dict]:
     """A script's argparse options, from its add_argument(...) calls in the order they come:
-    (options as ScriptTask keeps them, the parameters a block gets)."""
+    (options as DBPfMRITask keeps them, the parameters a block gets). `known`: values its options may
+    name (choices=tasks)."""
     calls = sorted((node for node in ast.walk(tree) if isinstance(node, ast.Call)
                     and isinstance(node.func, ast.Attribute) and node.func.attr == "add_argument"),
                    key=lambda node: (node.lineno, node.col_offset))
@@ -113,7 +143,7 @@ def _options(tree: ast.Module) -> tuple[list, dict]:
         positional = not flag.startswith("-")
         name = _literal(given.get("dest")) or flag.lstrip("-").replace("-", "_")
         default = _literal(given.get("default"))                    # None: none, or set in code
-        choices, nargs = _literal(given.get("choices")), _literal(given.get("nargs"))
+        choices, nargs = _literal(given.get("choices"), names=known), _literal(given.get("nargs"))
         number = given["type"].id if isinstance(given.get("type"), ast.Name) else None
         if action in ("store_true", "store_false"):
             kind, value = ("on", False) if action == "store_true" else ("off", True)
@@ -136,14 +166,18 @@ def _options(tree: ast.Module) -> tuple[list, dict]:
     return options, params
 
 
-def _literal(node, missing=None):
-    """A value written as is in the source ("easy", 40, ["a", "b"]); `missing` for anything computed."""
+def _literal(node, missing=None, names: dict | None = None):
+    """A value written as is in the source ("easy", 40, ["a", "b"]), or a name of `names`; `missing` for
+    anything computed."""
     if node is None:
         return missing
+    if isinstance(node, ast.Name) and node.id in (names or {}):
+        return names[node.id]
     try:
         return ast.literal_eval(node)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
         return missing
+
 
 def _length(tree: ast.Module, expressions: str | tuple[str, ...]) -> float | None:
     """A run's length in seconds: the first of `expressions` the script's constants can compute."""
@@ -192,6 +226,7 @@ def _number(node: ast.AST, names: dict[str, float]) -> float | None:
         except ArithmeticError:         # a division by zero, say
             return None
     return None
+
 
 def _run_numbers(folder: Path) -> list[str]:
     """The run numbers in the folder's file names (resources/vcst_stimuli_run2.csv: 2), data/ aside."""

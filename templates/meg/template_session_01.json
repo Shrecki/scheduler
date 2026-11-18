@@ -1,5 +1,5 @@
 {
-  "total_s": 6000.0,
+  "total_s": 6300.0,
   "timeline_mode": "TOTAL_RECORDING_TIME",
   "strict": false,
   "runs": [
@@ -91,6 +91,16 @@
       }
     },
     {
+      "category": "EYETRACKER_CALIBRATION",
+      "task": "eyetrack_calibration_meg",
+      "duration_s": 180.0,
+      "parameters": {
+        "run": "next",
+        "photodiode": true,
+        "screen": 1
+      }
+    },
+    {
       "category": "COGNITIVE_TASK_MEG",
       "task": "wisconsin_card_sorting_task",
       "duration_s": 510.8,
@@ -112,16 +122,6 @@
         "seed": 1,
         "soa": 0,
         "wait-trigger": false
-      }
-    },
-    {
-      "category": "EYETRACKER_CALIBRATION",
-      "task": "eyetrack_calibration_meg",
-      "duration_s": 180.0,
-      "parameters": {
-        "run": "next",
-        "photodiode": true,
-        "screen": 1
       }
     },
     {
@@ -173,48 +173,6 @@
     },
     {
       "category": "COGNITIVE_TASK_MEG",
-      "task": "meg_verbal_working_memory",
-      "duration_s": 457.0,
-      "parameters": {
-        "autostart": false,
-        "button-device": "",
-        "delay": 1000,
-        "delay-max": 1500,
-        "fb": 500,
-        "fb-delay": 600,
-        "fb-delay-max": 1000,
-        "iti": 1000,
-        "iti-max": 1500,
-        "max-rt": 3500,
-        "n": 40,
-        "option-offset-deg": 3.5,
-        "run": 1,
-        "seed": 1,
-        "step": 1000,
-        "text-deg": 1.1,
-        "wait-trigger": false
-      }
-    },
-    {
-      "category": "COGNITIVE_TASK_MEG",
-      "task": "meg_vcs",
-      "duration_s": 355.7,
-      "parameters": {
-        "autostart": false,
-        "button-device": "",
-        "fb": 500,
-        "lead-in": 2000,
-        "lead-out": 5000,
-        "max-rt": 5000,
-        "n": 0,
-        "resp-keys": "1,2,3,4",
-        "run": "next",
-        "run-fb": 10000,
-        "wait-trigger": false
-      }
-    },
-    {
-      "category": "COGNITIVE_TASK_MEG",
       "task": "meg_theory_of_mind",
       "duration_s": 538.15,
       "parameters": {
@@ -235,26 +193,9 @@
       }
     },
     {
-      "category": "COGNITIVE_TASK_MEG",
-      "task": "meg_reading_sentences",
-      "duration_s": 545.0,
-      "parameters": {
-        "autostart": false,
-        "button-device": "",
-        "fontsize": 72,
-        "nruns": 4,
-        "practice": false,
-        "practice-n": 5,
-        "run": 1,
-        "seed": 1,
-        "trigger": "t",
-        "wait-trigger": false
-      }
-    },
-    {
       "category": "EYETRACKER_CALIBRATION",
       "task": "eyetrack_calibration_meg",
-      "duration_s": 120.0,
+      "duration_s": 180.0,
       "parameters": {
         "run": "next",
         "photodiode": true,
@@ -292,7 +233,7 @@
     {
       "category": "VIDEO_GAME",
       "task": "fmrigym_rushhour",
-      "duration_s": 900.0,
+      "duration_s": 720.0,
       "parameters": {
         "curriculum": "all",
         "rig": "examples/rigs/laptop.json",
@@ -306,7 +247,7 @@
     {
       "category": "VIDEO_GAME",
       "task": "fmrigym_aigamestore",
-      "duration_s": 900.0,
+      "duration_s": 600.0,
       "parameters": {
         "curriculum": "game1",
         "rig": "examples/rigs/laptop.json",

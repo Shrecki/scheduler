@@ -14,11 +14,11 @@ Missing a program? sudo apt install gnome-sudoku gnome-mines gnome-chess aisleri
 import os
 from pathlib import Path
 
-from adapters.fmri_gym import gym_to_task
+from adapters.fmri_gym import gym_to_task, rig_names
 from adapters.dbp_mtb import mtb_to_task
-from adapters.dbp_fmri import dbp_mtb_to_task
+from adapters.dbp_fmri import dbp_fmri_to_task
 from adapters.dbp_meg import go_to_task
-from .tasks import ROOT, Category, Task, app, view, NEXT
+from .tasks import ROOT, SESSION_RIG, Category, Task, app, view, NEXT
 
 FMRI_GYM_PATH = Path("~/DBP/fmri-gym").expanduser()   # change to yours
 DBP_MTB_PATH = Path("~/DBP/dbp_mtb").expanduser()
@@ -27,12 +27,22 @@ DBP_MEG_PATH = Path("~/DBP/dbp_meg").expanduser()
 GOXPY_PATH = Path("~/DBP/goxpyriment").expanduser()              # change to yours
 EYETRACKER_PATH = Path("~/DBP/eyelink-track").expanduser()        # change to yours
 
-# Every game of the fmri-gym checkout: one task per game family, its levels and curricula as choices.
-# `rig`: the rig file each run starts with (under configs/); the card offers the others.
-GAME_TASKS = gym_to_task(FMRI_GYM_PATH, rig="examples/rigs/laptop.json")
+# The rig files: fmri-gym's (configs/<team>/rigs/<name>.json), by name under RIGS_DIR. The rig chosen
+# above the timeline (DEFAULT_RIG, until another is chosen on this computer) is that of every run whose
+# rig is SESSION_RIG, the default; a run can pick another in its card. A task of your own takes one with
+# the parameter {"rig": RIG} and "--rig", "{rig_file}" (the file's path) in its command.
+RIGS_DIR = (FMRI_GYM_PATH / "configs").absolute()
+RIGS = rig_names(RIGS_DIR)
+RIG = (SESSION_RIG, *RIGS)
+DEFAULT_RIG = "examples/rigs/laptop.json"           # change to yours
 
-COG_TASKS_MRI: list[Task] = dbp_mtb_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI,startup_s=20,
-                               length="MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION")
+# Every game of the fmri-gym checkout: one task per game family, its levels and curricula as choices.
+GAME_TASKS = gym_to_task(FMRI_GYM_PATH)
+
+# Every task of dbp_mri's run.py (ARC, VCST, WCST): its options as parameters, the rig and its
+# controls/ (button mappings) included.
+COG_TASKS_MRI: list[Task] = dbp_fmri_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI, startup_s=20, rigs=RIGS,
+                                             length="MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION")
 
 
 COG_TASKS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-Reading-Sentences", "MEG-ARC", "MEG-Intuitive-Physics", "MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-VCS", "MEG-verbal-working-memory", "MEG-visual-search", "Wisconsin-Card-Sorting-Task", "MEG-theory-of-mind"],
@@ -47,7 +57,7 @@ COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
 LOCALIZERS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-left-right"],
                                         category=Category.LOCALIZER_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd")
 
-LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI)
+LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI, rigs=RIGS)
 
 
 EYETRACKERS: list[Task] = [

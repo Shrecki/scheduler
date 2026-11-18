@@ -6,7 +6,7 @@ import re
 import sys
 from pathlib import Path
  
-from model.tasks import Category, Task
+from model.tasks import SESSION_RIG, Category, Task
  
 NEXT = "next"   # a run choice: the one after the earlier blocks' (see MtbTask.run_number)
  
@@ -33,7 +33,7 @@ class MtbTask(Task):
  
  
 def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
-                duration_s: float = 300, startup_s: float = 0) -> list[Task]:
+                duration_s: float = 300, startup_s: float = 0, rigs: tuple[str, ...] = ()) -> list[Task]:
     """The batteries of a dbp_mtb checkout, as it is now: one task per run_files/<battery>/ that has
     run files. No checkout there: none.
  
@@ -41,6 +41,10 @@ def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
     - order: its block orders (order_<k>/ folders), the first by default; only for a battery that has several.
     - run: "next" (see MtbTask.run_number), or one of its run numbers (those every order has).
     - no_ttl: start without waiting for the scanner trigger (run.py's --no-ttl, for practice).
+    - rig and controls, given fmri-gym's rig files (`rigs`, task_definitions' RIGS) and a controls/
+      folder (run.py takes both or neither): the rig, the session's unless the block picks another
+      (run.py's --rig: the rig file), and the button mapping, one of controls/*.json (--controls; the
+      shortest name first, "mtb"). Without them, run.py keeps constants.py's screen and keys.
     The subject is the session's. A block's planned duration is the battery's longest run (`duration_s`
     if no run file says); the block's clock starts at launch, so the wait for the trigger comes on top.
     """
@@ -48,6 +52,11 @@ def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
     if not (root / "run.py").is_file() or not (root / "run_files").is_dir():
         print(f"dbp_mtb: no run.py and run_files/ at {root}: no battery tasks", file=sys.stderr)
         return []
+    controls = sorted((p.stem for p in (root / "controls").glob("*.json")), key=lambda n: (len(n), n.lower()))
+    controls = [controls[0], *sorted(controls[1:], key=str.lower)] if controls else []    # the plainest first
+    if rigs and not controls:
+        print(f"dbp_mtb: no controls/*.json at {root}: no --rig either (run.py takes both or neither)", file=sys.stderr)
+    with_rig = {"rig": (SESSION_RIG, *rigs), "controls": tuple(controls)} if rigs and controls else {}
     tasks: list[Task] = []
     for battery in sorted(d for d in (root / "run_files").iterdir() if d.is_dir()):
         orders = sorted((d for d in battery.glob("order_*") if d.is_dir()), key=_natural)
@@ -56,9 +65,10 @@ def mtb_to_task(root: Path | str, category: Category = Category.LOCALIZER_MRI,
         if not numbers:
             continue
         params = {"order": tuple(o.name.removeprefix("order_") for o in orders)} if orders else {}
-        params.update(run=(NEXT, *numbers), no_ttl=False)
+        params.update(run=(NEXT, *numbers), no_ttl=False, **with_rig)
         command = ("python", "run.py", "{subject}", battery.name, *(["{order}"] if orders else []),
-                   "--run", "{run}", "{no_ttl:--no-ttl}")
+                   "--run", "{run}", "{no_ttl:--no-ttl}",
+                   *(["--rig", "{rig_file}", "--controls", "controls/{controls}.json"] if with_rig else []))
         longest = max((_length_s(path) for r in runs for path in r.values()), default=0)
         tasks.append(MtbTask(f"mtb_{battery.name}", f"Multi-Task Battery: {battery.name}", category, command,
                              params, duration_s=(longest or duration_s) + startup_s, project=root))

@@ -7,6 +7,8 @@ gives its script format to the session (SessionScripts(...)).
 - gym_to_task(root): reads an fmri-gym checkout and returns one GymTask per game family (its
   configs/curricula/<backend>/ folder), plus ScriptLine, for a line of a session script that is no
   fmri-play run.
+- rig_names(configs): fmri-gym's rig files (configs/<team>/rigs/<name>.json), which every task with a
+  rig shares (task_definitions' RIGS): a block plays with the session's rig unless it picks another.
 - SessionScripts(root, paths=PATHS): the session as a session script in fmri-gym's format
   (fmri_gym/standalone/session_script.py), and back:
 
@@ -39,13 +41,11 @@ import json
 import re
 import shlex
 import sys
-from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-from model.tasks import Category, Task
+from model.tasks import SESSION_RIG, Category, Task
 
-DEFAULT_RIG = "examples/rigs/laptop.json"   # under configs/: the rig offered first (keyboard, no scanner)
 TEARDOWN_S = 5.0    # fmri-play's --duration is the block's minus this: time to close before the block ends
 SWITCHES = (("loop", "--loop"), ("resume", "--resume"), ("dummy_trigger", "--dummy-trigger"),
             ("skip_load_games", "--skip-load-games"))   # fmri-play's, in the order fmri-gym writes them
@@ -94,14 +94,21 @@ class ScriptLine(Task):
                 "sh", "-c", p["command"]]
 
 
+def rig_names(configs: Path | str) -> tuple[str, ...]:
+    """fmri-gym's rig files, by name under its configs/ folder ("examples/rigs/laptop.json")."""
+    configs = Path(configs).expanduser()
+    return tuple(sorted(str(p.relative_to(configs)) for p in configs.glob("*/rigs/*.json")))
+
+
 def gym_to_task(root: Path | str, category: Category = Category.VIDEO_GAME, duration_s: float = 300,
-                rig: str = DEFAULT_RIG, line_category: Category = Category.VIDEO_GAME) -> list[Task]:
+                line_category: Category = Category.VIDEO_GAME) -> list[Task]:
     """The tasks of an fmri-gym checkout, as it is now. No checkout there: none.
 
     A GymTask's parameters:
     - curriculum: what its folder can play. Each single level ("levels/<name>") and each curriculum
       that plays several in a row ("<name>": "all", controller variants like "all-GMPD3-ABXY-nav").
-    - rig: the rig files, configs/<team>/rigs/<rig>.json (`rig` first).
+    - rig: the session's rig (SESSION_RIG, chosen above the timeline), or one of the rig files,
+      configs/<team>/rigs/<rig>.json.
     - play_to_end: no --duration, fmri-play plays the curriculum to its end (the block's duration is
       then only the plan). Off: --duration is the block's duration minus TEARDOWN_S, so it has
       time to close before the block ends.
@@ -111,9 +118,8 @@ def gym_to_task(root: Path | str, category: Category = Category.VIDEO_GAME, dura
     """
     root = Path(root).expanduser()
     configs = root / "configs"
-    rigs = sorted(str(p.relative_to(configs)) for p in configs.glob("*/rigs/*.json"))
-    rigs = tuple(sorted(rigs, key=lambda r: r != rig))             # `rig` first, if there
-    if not (configs / "curricula").is_dir() or not rigs:
+    rigs = (SESSION_RIG, *rig_names(configs))
+    if not (configs / "curricula").is_dir() or len(rigs) == 1:
         print(f"fmri-gym: no checkout with curricula and rig files at {root}: no game tasks", file=sys.stderr)
         return []
     tasks: list[Task] = []
@@ -173,8 +179,8 @@ class SessionScripts:
     Each line plays one run on its own, as the scheduler plays it: uv run --directory "$FMRI_GYM_PATH" ...
     fmri-gym's session editor reads those as commands; it edits only lines that start with uv run fmri-play."""
 
-    def __init__(self, root: Path | str, tasks: list[Task], rig: str = DEFAULT_RIG, paths: dict | None = None):
-        self.root, self.tasks, self.rig = Path(root).expanduser().absolute(), tasks, rig
+    def __init__(self, root: Path | str, tasks: list[Task], paths: dict | None = None):
+        self.root, self.tasks = Path(root).expanduser().absolute(), tasks
         paths = paths or {"FMRI_GYM_PATH": self.root}
         self.paths = {name: Path(path).expanduser().absolute() for name, path in paths.items()}
 
@@ -183,18 +189,22 @@ class SessionScripts:
 
     # writing
     def write(self, session) -> str:
-        rigs = [b.params["rig"] for b in session.blocks if isinstance(self._task(b.task), GymTask)]
-        rig = Counter(rigs).most_common(1)[0][0] if rigs else self.rig        # the script's RIG=
         paths = {**self.paths, "SESSION_DIR": session.session_dir.absolute()}
         used: dict[str, Path] = {}                       # the folders the lines use, set at the top
         word = lambda w: _shell_word(w, paths, used)     # noqa: E731
+        session_rig = str(self.root / "configs" / session.rig)     # its file, as Session.command gives it
+
+        def rig_word(w: str) -> str:                     # the session's rig file: the script's RIG=, as the games'
+            root = word(str(self.root))
+            return root[:-1] + '/$RIG"' if root.endswith('"') else root + '/"$RIG"'
         lines = []
         for i, block in enumerate(session.blocks):
             task = self._task(block.task)
+            p = {**task.defaults(), **block.params}
+            on_session_rig = p.get("rig") == SESSION_RIG
             if isinstance(task, GymTask):
-                p = {**task.defaults(), **block.params}
                 words = task.in_project(["fmri-play", *task.play(p, '"$SUBJECT"', '"$SES"', task.run_number(p, session.blocks[:i]),
-                                                                 '"$RIG"' if p["rig"] == rig else f"configs/{p['rig']}",
+                                                                 '"$RIG"' if on_session_rig else f"configs/{p['rig']}",
                                                                  block.duration_ms / 1000)])
                 lines.append(" ".join(w if w in HEAD_VARS else word(w) for w in words))   # as GymTask.argv, with the variables
             else:
@@ -203,14 +213,14 @@ class SessionScripts:
                     line = f"(cd {word(str(self.root))} && {params.pop('command')})"
                 else:                                    # what the scheduler runs (Session.command)
                     argv, outdir = session.command(i)
-                    command = " ".join(word(w) for w in argv)
+                    command = " ".join(rig_word(w) if on_session_rig and w == session_rig else word(w) for w in argv)
                     if argv[:2] != ["uv", "run"]:            # uv run --directory: in its folder already
                         command = f"(cd {word(str(Path(task.project or outdir).absolute()))} && {command})"
                     line = f"mkdir -p {word(str(outdir))} && {command}"
                 mark = {"task": task.key, "duration_s": block.duration_ms / 1000, "parameters": params}
                 lines.append(f"{line}  {MARK} {json.dumps(mark)}")
         head = [*HEADER, *(f"{name}={shlex.quote(str(path))}" for name, path in paths.items() if name in used),
-                f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + rig)}",
+                f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + session.rig) if session.rig else ''}",
                 f"SES=${{1:-{session.session_number:03d}}}",
                 RUNS_FROM]
         return "\n".join(head + lines) + "\n"
@@ -240,7 +250,8 @@ class SessionScripts:
                 runs.append(self._run(command, _words(command), values, folder / here))
             else:
                 runs.append(self._run(line, words, values, folder))
-        return {"runs": runs}, f"{skipped} commented-out runs left out" if skipped else ""
+        rig = {"rig": values["RIG"].removeprefix("./").removeprefix("configs/")} if values.get("RIG") else {}
+        return {**rig, "runs": runs}, f"{skipped} commented-out runs left out" if skipped else ""
 
     def _run(self, line: str, words: list[str], values: dict, folder: Path) -> dict:
         command, _, mark = line.partition(MARK)
@@ -261,17 +272,17 @@ class SessionScripts:
         if game and match[2] in game.choices("curriculum"):
             params = {"curriculum": match[2], "play_to_end": args.duration is None,
                       **{name: getattr(args, name) for name, _ in SWITCHES}}
+            given = words[words.index("--rig") + 1] if "--rig" in words[:-1] else ""     # as written: "$RIG"?
             rig = (args.rig or "").removeprefix("./").removeprefix("configs/")
-            if rig in game.choices("rig"):
-                params["rig"] = rig                      # else (given at launch, or unknown): the default
+            if given not in ("$RIG", "${RIG}") and rig in game.choices("rig"):
+                params["rig"] = rig                      # else ($RIG, given at launch, unknown): the session's
             block_s = args.duration + TEARDOWN_S if args.duration else game.duration_s
             return {"task": game.key, "duration_s": block_s, "parameters": params}
         other = next((t for t in self.tasks if isinstance(t, ScriptLine)), None)
         if other is None:
             raise ValueError(f"no task for a line that is no fmri-gym run: {line}")
         here = "" if folder == self.root else f"cd {shlex.quote(str(folder))} && "
-        rig = (values.get("RIG") or "").removeprefix("configs/")
-        params = {"command": here + line, **({"rig": rig} if rig in other.choices("rig") else {})}
+        params = {"command": here + line}             # its $RIG: the session's rig
         return {"task": other.key, "duration_s": other.duration_s, "parameters": params}
 
 

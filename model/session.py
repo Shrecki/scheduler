@@ -6,6 +6,7 @@ by the update methods below (design edits, clock ticks), which do not involve th
 
 import itertools
 import json
+from collections import Counter
 import random
 import time
 from dataclasses import dataclass, field, replace
@@ -13,9 +14,9 @@ from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 
-from .task_definitions import get_task, tasks_for
+from .task_definitions import DEFAULT_RIG, RIGS, RIGS_DIR, get_task, tasks_for
 from .templates import Template, find_templates
-from .tasks import Category
+from .tasks import SESSION_RIG, Category
 
 MIN = 60_000
 
@@ -62,6 +63,15 @@ class Play:
         return 0 if self.started_at is None else (self.ended_at or now) - self.started_at
 
 
+def design_rig(design: dict) -> str | None:
+    """The rig a design was made for: the one it records, or (saved before the session had a rig) the
+    one most of its runs name."""
+    if "rig" in design:
+        return design["rig"]
+    named = [p["rig"] for r in design["runs"] if (p := r.get("parameters", {})).get("rig") not in (None, SESSION_RIG)]
+    return Counter(named).most_common(1)[0][0] if named else None
+
+
 class Session:
     def __init__(self, processes, scripts=None):
         self.processes = processes      # the launcher: spawn(argv, outdir, grace_s, project) / stop()
@@ -79,6 +89,8 @@ class Session:
         self.queued: int | None = None  # the block to play next, if clicked (None: the one after `farthest`)
         self.autoplay = True            # play the blocks one after the other; off: each when clicked
         self.strict = True              # at the end time, stop the run playing; off: let it end by itself
+        self.rigs = RIGS                # the rig files there are (fmri-gym's), by name under RIGS_DIR
+        self.rig = DEFAULT_RIG if DEFAULT_RIG in RIGS else next(iter(RIGS), "")   # every run's, unless it picks another
         self.plays: list[Play] = []     # every launch, replays included
         self.rec_start = self.rec_end = None
         self.rec_start_wall: datetime | None = None   # wall clock at rec_start, for acq_time
@@ -133,6 +145,12 @@ class Session:
     def set_strict(self, on: bool):
         self.strict = on
         self.notify()
+
+    def set_rig(self, name: str):
+        """The rig every run on SESSION_RIG uses (the runs to come, if recording)."""
+        if name in self.rigs and name != self.rig and not self.in_state("finalize"):
+            self.rig = name
+            self.notify()
 
     def set_total(self, ms: int):
         """The session's length; while recording, not less than the time already used."""
@@ -295,8 +313,12 @@ class Session:
         block, task = self.blocks[index], get_task(self.blocks[index].task)
         again = f"_{n}" if (n := self.times_played(index)) > 1 else ""         # a run played again: its own folder
         outdir = (self.session_dir / "blocks" / f"{index + 1:02d}_{task.key}{again}").absolute()  # tasks run elsewhere
-        argv = task.argv(block.params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
+        params = {**task.defaults(), **block.params}
+        if params.get("rig") == SESSION_RIG:            # the rig chosen above the timeline
+            params["rig"] = self.rig
+        argv = task.argv(params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
                          subject=self.subject, session=f"ses-{self.session_number:02d}", ses=self.session_number,
+                         rig_file=str(RIGS_DIR / params["rig"]) if params.get("rig") else "",
                          before=self.blocks[:index])
         return task.in_project(argv), outdir
 
@@ -336,6 +358,7 @@ class Session:
     def design(self, **extra) -> dict:
         """The design as a reusable template: runs in order, with their task, duration and parameters."""
         return {**extra, "total_s": self.total_ms / 1000, "timeline_mode": self.mode.name, "strict": self.strict,
+                "rig": self.rig,
                 "runs": [{"category": b.category.name, "task": b.task, "duration_s": b.duration_ms / 1000,
                           "parameters": b.params} for b in self.blocks]}
 
@@ -376,23 +399,28 @@ class Session:
         name = name or ("the previous session's design" if isinstance(source, dict) else Path(source).name)
         try:
             design = source if isinstance(source, dict) else json.loads(Path(source).read_text(encoding="utf-8"))
-            self.blocks = blocks = self.blocks_from(design["runs"])
+            self.blocks = blocks = self.blocks_from(design)
             self.total_ms = int(float(design.get("total_s", self.total_ms / 1000)) * 1000)
             self.mode = TimelineMode[design.get("timeline_mode", self.mode.name)]
             self.strict = bool(design.get("strict", self.strict))
             self.notice = f"Loaded {name}: {len(blocks)} runs"
+            if (made_for := design_rig(design)) not in (None, self.rig):   # the rig is this computer's: kept
+                self.notice += f"; it was made for the rig {made_for}, its runs on the session rig play with {self.rig}"
         except (OSError, ValueError, KeyError, TypeError) as exc:
             self.notice = f"Could not load {name}: {exc}"
         self.notify()
 
-    def blocks_from(self, runs: list[dict]) -> list[Block]:
-        """A design's runs as blocks (an invalid parameter keeps its default)."""
+    def blocks_from(self, design: dict) -> list[Block]:
+        """A design's runs as blocks (an invalid parameter keeps its default). A design saved before
+        the session had a rig: the rig most of its runs name becomes the session's (SESSION_RIG)."""
+        common = None if "rig" in design else design_rig(design)
         blocks = []
-        for run in runs:
+        for run in design["runs"]:
             task = get_task(run["task"])
             block = self.new_block(task)
             block.duration_ms = min(int(float(run["duration_s"]) * 1000), self.max_block_ms)
-            block.params.update({k: v for k, v in run.get("parameters", {}).items() if task.accepts(k, v)})
+            block.params.update({k: SESSION_RIG if k == "rig" and v == common else v
+                                 for k, v in run.get("parameters", {}).items() if task.accepts(k, v)})
             blocks.append(block)
         return blocks
 
@@ -416,7 +444,7 @@ class Session:
             return
         template = self.templates[number]
         try:
-            blocks = self.blocks_from(template.design["runs"])
+            blocks = self.blocks_from(template.design)
         except (ValueError, KeyError, TypeError) as exc:
             self.notice = f"Could not add {template.name}: {exc}"
             return self.notify()
