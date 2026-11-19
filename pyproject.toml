@@ -7,6 +7,7 @@ dependencies = [
     "python-statemachine>=3.2"
 ]
 [tool.uv]
+required-version=">=0.13.0"
 required-environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
 ]
