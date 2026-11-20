@@ -18,7 +18,7 @@ from adapters.fmri_gym import gym_to_task, rig_names
 from adapters.dbp_mtb import mtb_to_task
 from adapters.dbp_fmri import dbp_fmri_to_task
 from adapters.dbp_meg import go_to_task
-from .tasks import ROOT, SESSION_RIG, Category, Task, app, view, NEXT
+from .tasks import ROOT, SESSION_RIG, Category, Recording, Task, app, view, with_recording, NEXT
 
 FMRI_GYM_PATH = Path("~/DBP/fmri-gym").expanduser()   # change to yours
 DBP_MTB_PATH = Path("~/DBP/dbp_mtb").expanduser()
@@ -36,28 +36,40 @@ RIGS = rig_names(RIGS_DIR)
 RIG = (SESSION_RIG, *RIGS)
 DEFAULT_RIG = "examples/rigs/laptop.json"           # change to yours
 
+# The eyetracker, recording alongside every run of the projects' tasks below (with_recording): eyetrack_record
+# starts first, in eyelink-track's environment; the run starts once it says it waits for the trigger (not
+# at all, if it ended before); after the run, it is stopped (SIGTERM: it saves). Its output: eyetracker.log
+# in the run's folder, also added to the run's output.log. {run}: the task's own run (its --run), else its
+# n-th run in the session. startup_s: planned on top of each run, and taken from the task's own time
+# ({duration_s}). RECORD_EYES = False: no recording; "--mock" in the command: without an EyeLink.
+RECORD_EYES = True
+EYES = Recording(("eyetrack_record", "--run-simultaneous", "--subject", "{subject}", "--session", "{ses}",
+                  "--run", "{run}", "--task", "{task}"),
+                 ready="Waiting for the trigger", project=EYETRACKER_PATH, log="eyetracker.log",
+                 startup_s=10, stop_grace_s=10) if RECORD_EYES else None             # change to yours
+
 # Every game of the fmri-gym checkout: one task per game family, its levels and curricula as choices.
-GAME_TASKS = gym_to_task(FMRI_GYM_PATH)
+GAME_TASKS = with_recording(gym_to_task(FMRI_GYM_PATH), EYES)
 
 # Every task of dbp_mri's run.py (ARC, VCST, WCST): its options as parameters, the rig and its
 # controls/ (button mappings) included.
-COG_TASKS_MRI: list[Task] = dbp_fmri_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI, startup_s=20, rigs=RIGS,
-                                             length="MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION")
+COG_TASKS_MRI: list[Task] = with_recording(dbp_fmri_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI, startup_s=20, rigs=RIGS,
+                                             length="MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION"), EYES)
 
 
-COG_TASKS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-Reading-Sentences", "MEG-ARC", "MEG-Intuitive-Physics", "MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-VCS", "MEG-verbal-working-memory", "MEG-visual-search", "Wisconsin-Card-Sorting-Task", "MEG-theory-of-mind"],
-                                        category=Category.COGNITIVE_TASK_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd")
+COG_TASKS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-Reading-Sentences", "MEG-ARC", "MEG-Intuitive-Physics", "MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-VCS", "MEG-verbal-working-memory", "MEG-visual-search", "Wisconsin-Card-Sorting-Task", "MEG-theory-of-mind"],
+                                        category=Category.COGNITIVE_TASK_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd"), EYES)
 
-MOVIE_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-movie"],
-                                        category=Category.MOVIE_WATCHING, duration_s=120, sources=DBP_MEG_PATH / "cmd")
+MOVIE_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-movie"],
+                                        category=Category.MOVIE_WATCHING, duration_s=120, sources=DBP_MEG_PATH / "cmd"), EYES)
 
 COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
 
 
-LOCALIZERS_MEG: list[Task] = go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-left-right"],
-                                        category=Category.LOCALIZER_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd")
+LOCALIZERS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-left-right"],
+                                        category=Category.LOCALIZER_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd"), EYES)
 
-LOCALIZERS_MRI: list[Task] =  mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI, rigs=RIGS)
+LOCALIZERS_MRI: list[Task] =  with_recording(mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI, rigs=RIGS), EYES)
 
 
 EYETRACKERS: list[Task] = [

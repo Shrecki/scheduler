@@ -8,6 +8,7 @@ import itertools
 import json
 from collections import Counter
 import random
+import shlex
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -16,7 +17,7 @@ from pathlib import Path
 
 from .task_definitions import DEFAULT_RIG, RIGS, RIGS_DIR, get_task, tasks_for
 from .templates import Template, find_templates
-from .tasks import SESSION_RIG, Category
+from .tasks import SESSION_RIG, Category, alongside, run_given
 
 MIN = 60_000
 
@@ -310,18 +311,34 @@ class Session:
     # --- actions, called by the state machine --------------------------------------------------------
     def command(self, index: int) -> tuple[list[str], Path]:
         """What run `index` executes, run in its project's folder (else in the output folder): its command
-        line (in its project's Python environment: Task.in_project), and its output folder."""
+        line, and its output folder. With a recording alongside (Task.recording), the task's and the
+        recording's in one shell line (tasks.alongside), as a session script writes it: sh -c "..."."""
+        argv, recording, outdir = self.commands(index)
+        if recording is None:
+            return argv, outdir
+        task = get_task(self.blocks[index].task)
+        return ["sh", "-c", alongside(shlex.join(argv), shlex.join(recording), task.recording.ready,
+                                      shlex.quote(str(outdir / task.recording.log)))], outdir
+
+    def commands(self, index: int) -> tuple[list[str], list[str] | None, Path]:
+        """Run `index`'s task command line (in its project's Python environment: Task.in_project), its
+        recording's (None: it has none), and its output folder."""
         block, task = self.blocks[index], get_task(self.blocks[index].task)
         again = f"_{n}" if (n := self.times_played(index)) > 1 else ""         # a run played again: its own folder
         outdir = (self.session_dir / "blocks" / f"{index + 1:02d}_{task.key}{again}").absolute()  # tasks run elsewhere
         params = {**task.defaults(), **block.params}
         if params.get("rig") == SESSION_RIG:            # the rig chosen above the timeline
             params["rig"] = self.rig
-        argv = task.argv(params, duration_s=f"{block.duration_ms / 1000:g}", outdir=outdir,
-                         subject=self.subject, session=f"ses-{self.session_number:02d}", ses=self.session_number,
-                         rig_file=str(RIGS_DIR / params["rig"]) if params.get("rig") else "",
-                         before=self.blocks[:index])
-        return task.in_project(argv), outdir
+        context = {"duration_s": f"{task.time_left(block.duration_ms / 1000):g}", "outdir": outdir,
+                   "subject": self.subject, "session": f"ses-{self.session_number:02d}", "ses": self.session_number,
+                   "rig_file": str(RIGS_DIR / params["rig"]) if params.get("rig") else ""}
+        before = self.blocks[:index]
+        argv = task.argv(params, **context, before=before)
+        if task.recording is None:
+            return task.in_project(argv), None, outdir
+        run = run_given(argv) or 1 + sum(b.task == task.key for b in before)     # the task's run, else its n-th
+        return (task.in_project(argv), task.recording.argv({**params, **context, "task": task.key, "run": run}),
+                outdir)
 
     def queue(self, index: int):
         self.queued = index
@@ -336,7 +353,8 @@ class Session:
         self.plays.append(Play(index, params))
         argv, outdir = self.command(index)
         task = get_task(self.current.task)
-        self.processes.spawn(argv, outdir, task.stop_grace_s, task.project)
+        grace_s = task.stop_grace_s + (task.recording.stop_grace_s if task.recording else 0)   # then it saves
+        self.processes.spawn(argv, outdir, grace_s, task.project)
 
     def mark_started(self):
         block, self.plays[-1].started_at = self.current, now_ms()

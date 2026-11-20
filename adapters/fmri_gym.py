@@ -44,7 +44,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from model.tasks import SESSION_RIG, Category, Task
+from model.tasks import SESSION_RIG, Category, Task, alongside
 
 TEARDOWN_S = 5.0    # fmri-play's --duration is the block's minus this: time to close before the block ends
 SWITCHES = (("loop", "--loop"), ("resume", "--resume"), ("dummy_trigger", "--dummy-trigger"),
@@ -200,25 +200,30 @@ class SessionScripts:
         lines = []
         for i, block in enumerate(session.blocks):
             task = self._task(block.task)
-            p = {**task.defaults(), **block.params}
+            p, params = {**task.defaults(), **block.params}, dict(block.params)
             on_session_rig = p.get("rig") == SESSION_RIG
-            if isinstance(task, GymTask):
+            argv, recording, outdir = session.commands(i)
+            if isinstance(task, GymTask):                # as GymTask.argv, with the variables
                 words = task.in_project(["fmri-play", *task.play(p, '"$SUBJECT"', '"$SES"', task.run_number(p, session.blocks[:i]),
                                                                  '"$RIG"' if on_session_rig else f"configs/{p['rig']}",
-                                                                 block.duration_ms / 1000)])
-                lines.append(" ".join(w if w in HEAD_VARS else word(w) for w in words))   # as GymTask.argv, with the variables
-            else:
-                params = dict(block.params)
-                if isinstance(task, ScriptLine):         # as typed, in fmri-gym's folder, by the shell
-                    line = f"(cd {word(str(self.root))} && {params.pop('command')})"
-                else:                                    # what the scheduler runs (Session.command)
-                    argv, outdir = session.command(i)
-                    command = " ".join(rig_word(w) if on_session_rig and w == session_rig else word(w) for w in argv)
-                    if argv[:2] != ["uv", "run"]:            # uv run --directory: in its folder already
-                        command = f"(cd {word(str(Path(task.project or outdir).absolute()))} && {command})"
-                    line = f"mkdir -p {word(str(outdir))} && {command}"
-                mark = {"task": task.key, "duration_s": block.duration_ms / 1000, "parameters": params}
-                lines.append(f"{line}  {MARK} {json.dumps(mark)}")
+                                                                 task.time_left(block.duration_ms / 1000))])
+                command = " ".join(w if w in HEAD_VARS else word(w) for w in words)
+            elif isinstance(task, ScriptLine):           # as typed, in fmri-gym's folder, by the shell
+                command = params["command"] if recording else params.pop("command")
+            else:                                        # what the scheduler runs (Session.commands)
+                command = " ".join(rig_word(w) if on_session_rig and w == session_rig else word(w) for w in argv)
+            if recording:                                # with it, as Session.command: one line, in a subshell
+                command = alongside(command, " ".join(word(w) for w in recording), task.recording.ready,
+                                    word(str(outdir / task.recording.log)))
+            elif isinstance(task, GymTask):              # fmri-gym's own line, which its session editor edits
+                lines.append(command)
+                continue
+            if argv[:2] != ["uv", "run"]:                # else uv run --directory: in its folder already
+                command = f"cd {word(str(Path(task.project or outdir).absolute()))} && {command}"
+            line = f"({command})" if recording or argv[:2] != ["uv", "run"] else command
+            line = line if isinstance(task, ScriptLine) and not recording else f"mkdir -p {word(str(outdir))} && {line}"
+            mark = {"task": task.key, "duration_s": block.duration_ms / 1000, "parameters": params}
+            lines.append(f"{line}  {MARK} {json.dumps(mark)}")
         head = [*HEADER, *(f"{name}={shlex.quote(str(path))}" for name, path in paths.items() if name in used),
                 f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + session.rig) if session.rig else ''}",
                 f"SES=${{1:-{session.session_number:03d}}}",
@@ -261,10 +266,9 @@ class SessionScripts:
         except (ValueError, KeyError, TypeError, StopIteration):
             run = task = None
         if task is not None:                             # written by write(): back as it was
-            if isinstance(task, ScriptLine):             # without the (cd ... && ...) write() put it in
-                command = command.strip()
-                typed = _unwrap(command, values)[1] if command.startswith("(") else command
-                run.setdefault("parameters", {})["command"] = typed
+            if isinstance(task, ScriptLine) and "command" not in run.setdefault("parameters", {}):
+                command = command.strip()                # without the (cd ... && ...) write() put it in
+                run["parameters"]["command"] = _unwrap(command, values)[1] if command.startswith("(") else command
             return run
         args = _play_args(words, values)
         match = args and re.fullmatch(r"(?:\./)?configs/curricula/([^/]+)/(.+)\.json", args.curriculum)

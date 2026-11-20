@@ -1,5 +1,5 @@
 {
-  "total_s": 6300.0,
+  "total_s": 6000.0,
   "timeline_mode": "TOTAL_RECORDING_TIME",
   "strict": true,
   "rig": "examples/rigs/laptop.json",
