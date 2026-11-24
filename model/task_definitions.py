@@ -27,27 +27,16 @@ DBP_MEG_PATH = Path("~/DBP/dbp_meg").expanduser()
 GOXPY_PATH = Path("~/DBP/goxpyriment").expanduser()              # change to yours
 EYETRACKER_PATH = Path("~/DBP/eyelink-track").expanduser()        # change to yours
 DATA_DIR = (ROOT / "output").absolute()                           # the eyetracker's data: change to yours
- 
 
-# The rig files: fmri-gym's (configs/<team>/rigs/<name>.json), by name under RIGS_DIR. The rig chosen
-# above the timeline (DEFAULT_RIG, until another is chosen on this computer) is that of every run whose
-# rig is SESSION_RIG, the default; a run can pick another in its card. A task of your own takes one with
-# the parameter {"rig": RIG} and "--rig", "{rig_file}" (the file's path) in its command.
 RIGS_DIR = (FMRI_GYM_PATH / "configs").absolute()
 RIGS = rig_names(RIGS_DIR)
 RIG = (SESSION_RIG, *RIGS)
 DEFAULT_RIG = "examples/rigs/laptop.json"           # change to yours
 
-# The eyetracker, recording alongside every run of the projects' tasks below (with_recording): eyetrack_record
-# starts first, in eyelink-track's environment; the run starts once it says it waits for the trigger (not
-# at all, if it ended before); after the run, it is stopped (SIGTERM: it saves). Its output: eyetracker.log
-# in the run's folder, also added to the run's output.log. {run}: the task's own run (its --run), else its
-# n-th run in the session. startup_s: planned on top of each run, and taken from the task's own time
-# ({duration_s}). RECORD_EYES = False: no recording; "--mock" in the command: without an EyeLink.
 RECORD_EYES = True
-EYES = Recording(("eyetrack_record", "--run-simultaneous", "--subject", "{subject}", "--session", "{ses}",
+EYES = Recording(("python", "eyetrack_record.py", "--run-simultaneous", "--subject", "{subject}", "--session", "{ses}",
                   "--run", "{run}", "--task", "{task}", "--directory", f"{DATA_DIR}/{{subject}}/ses-{{ses}}"),
-                 ready="Waiting for the trigger", project=EYETRACKER_PATH, log="eyetracker.log",
+                 ready="Waiting for the trigger", name="recording", project=EYETRACKER_PATH, log="eyetracker.log",
                  startup_s=10, stop_grace_s=10) if RECORD_EYES else None             # change to yours
 
 # Every game of the fmri-gym checkout: one task per game family, its levels and curricula as choices.
@@ -70,9 +59,6 @@ COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
 
 LOCALIZERS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-button-press", "MEG-left-right", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-Intuitive-Physics", "MEG-Reading-Sentences","MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-verbal-working-memory", "MEG-visual-search","MEG-theory-of-mind", "MEG-movie"],
                                         category=Category.LOCALIZER_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd"), EYES)
-
-LOCALIZERS_MRI: list[Task] =  with_recording(mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI, rigs=RIGS), EYES)
-
 
 EYETRACKERS: list[Task] = [
     Task("eyetrack_calibration_meg", "EyeTrack Calibration (MEG)", Category.EYETRACKER_CALIBRATION,
@@ -100,7 +86,8 @@ TASKS_DUMMY: list[Task] = [
 ]
 
 TASKS = COG_TASKS + LOCALIZERS_MEG + LOCALIZERS_MRI + GAME_TASKS + EYETRACKERS + MOVIE_MEG
-PATHS = {name: value for name, value in dict(globals()).items() if name.endswith("_PATH") and isinstance(value, Path)}
+PATHS = {name: value for name, value in dict(globals()).items()             # a session script's variables
+         if (name.endswith("_PATH") or name == "DATA_DIR") and isinstance(value, Path)}
 
 def tasks_for(category: Category) -> list[Task]:
     return [t for t in TASKS if t.category == category]

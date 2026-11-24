@@ -49,15 +49,19 @@ class Recording:
     command: tuple[str, ...]
     ready: str                          # what its output says once it records (or waits for the trigger)
     name: str = "recording"             # its shell function: with_NAME (function)
-    project: Path | str | None = None   # its own project folder, in whose Python environment it runs
+    project: Path | str | None = None   # its own folder, where it runs, in the environment uv finds there
     log: str = "recording.log"          # its output, in the run's folder
     startup_s: float = 0                # time it takes to be ready: planned on top of each run, not the task's
     stop_grace_s: float = 5.0           # time it may take to save, on top of the task's stop_grace_s
 
     def argv(self, values: dict) -> list[str]:
-        """Its command line as it runs (in_project), placeholders filled in from `values`."""
+        """Its command line as it runs, placeholders filled in from `values`: given a project, always by uv
+        in it, whatever environment uv finds for it there (uv run --directory PROJECT --no-sync: nothing
+        installed); a wrong folder then fails loudly, instead of running the command outside it."""
         values = {name: Switch(v) if isinstance(v, bool) else v for name, v in values.items()}
-        return in_project(self.project, [arg for part in self.command if (arg := part.format(**values))])
+        argv = [arg for part in self.command if (arg := part.format(**values))]
+        project = Path(self.project).expanduser() if self.project else None
+        return ["uv", "run", "--directory", str(project), "--no-sync", *argv] if project else argv
 
     def function(self) -> str:
         """The shell function that runs a task with this recording: with_NAME DIR 'RECORDER' TASK...,
