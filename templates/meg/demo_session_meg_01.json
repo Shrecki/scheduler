@@ -1,7 +1,7 @@
 {
   "total_s": 6000.0,
   "timeline_mode": "TOTAL_RECORDING_TIME",
-  "strict": true,
+  "strict": false,
   "rig": "examples/rigs/laptop.json",
   "runs": [
     {
@@ -119,34 +119,21 @@
       }
     },
     {
-      "category": "COGNITIVE_TASK_MEG",
-      "task": "wisconsin_card_sorting_task",
-      "duration_s": 511.4,
+      "category": "VIDEO_GAME",
+      "task": "fmrigym_line",
+      "duration_s": 310.0,
       "parameters": {
-        "all-cards": false,
-        "autostart": false,
-        "button-device": "",
-        "fb": 800,
-        "fb-delay": 600,
-        "fb-delay-max": 1000,
-        "iti": 800,
-        "iti-max": 1200,
-        "max_duration": "",
-        "maxrun": 10,
-        "minrun": 6,
-        "mouse": false,
-        "n": 128,
-        "resp-keys": "1,2,3,4",
-        "seed": 1,
-        "soa": 0,
-        "wait-trigger": false
+        "command": "mkdir -p \"$SESSION_DIR/blocks/08_wisconsin_card_sorting_task\" && (cd \"$DBP_MEG_PATH\" && eyetrack_record --run-simultaneous --subject sub-01 --session 1 --run 1 --task wisconsin_card_sorting_task > \"$SESSION_DIR/blocks/08_wisconsin_card_sorting_task/eyetracker.log\" 2>&1 & REC=$! TASK=; trap 'if [ -n \"$TASK\" ]; then kill $TASK; else kill $REC; fi 2>/dev/null' TERM INT; until grep -qF 'Waiting for the trigger' \"$SESSION_DIR/blocks/08_wisconsin_card_sorting_task/eyetracker.log\" 2>/dev/null || ! kill -0 $REC 2>/dev/null; do sleep 0.2; done; if kill -0 $REC 2>/dev/null; then \"$DBP_MEG_PATH/bin/Wisconsin-Card-Sorting-Task\" -s=01 & TASK=$!; while wait $TASK; CODE=$?; kill -0 $TASK 2>/dev/null; do :; done; kill $REC 2>/dev/null; else echo '[recording] it ended, or the run was stopped, before it was ready: the task did not start'; CODE=1; fi; while kill -0 $REC 2>/dev/null; do wait $REC; done; cat \"$SESSION_DIR/blocks/08_wisconsin_card_sorting_task/eyetracker.log\"; (exit $CODE))  # scheduler: {\"task\": \"wisconsin_card_sorting_task\", \"duration_s\": 511.4, \"parameters\": {\"all-cards\": false, \"autostart\": false, \"button-device\": \"\", \"fb\": 800, \"fb-delay\": 600, \"fb-delay-max\": 1000, \"iti\": 800, \"iti-max\": 1200, \"max_duration\": \"\", \"maxrun\": 10, \"minrun\": 6, \"mouse\": false, \"n\": 128, \"resp-keys\": \"1,2,3,4\", \"seed\": 1, \"soa\": 0, \"wait-trigger\": false}}",
+        "rig": "session rig"
       }
     },
     {
-      "category": "LOCALIZER_MEG",
+      "category": "COGNITIVE_TASK_MEG",
       "task": "meg_retinotopy",
       "duration_s": 155.029,
       "parameters": {
+        "arrows": true,
+        "audio": true,
         "autostart": false,
         "button-device": "",
         "fullfield": false,
@@ -163,7 +150,7 @@
       }
     },
     {
-      "category": "COGNITIVE_TASK_MEG",
+      "category": "LOCALIZER_MEG",
       "task": "meg_spatial_working_memory",
       "duration_s": 437.0,
       "parameters": {
@@ -226,7 +213,7 @@
       }
     },
     {
-      "category": "COGNITIVE_TASK_MEG",
+      "category": "LOCALIZER_MEG",
       "task": "meg_reading_sentences",
       "duration_s": 545.0,
       "parameters": {
@@ -295,6 +282,7 @@
       "task": "meg_left_right",
       "duration_s": 205.0,
       "parameters": {
+        "audio": false,
         "autostart": false,
         "button-device": "",
         "duration": 180.0,

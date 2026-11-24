@@ -11,7 +11,6 @@ output.log and, with ECHO, to the terminal the scheduler was started from, marke
 """
 
 import os
-import re
 import shlex
 import shutil
 import signal
@@ -56,12 +55,6 @@ else:
             os.killpg(proc.pid, signal.SIGKILL)
 
 
-def passes_on(argv: list[str]) -> bool:
-    """Whether argv passes a stop on to what it runs, so is signalled alone: one of PASS_ON, or a shell line
-    that traps SIGTERM to do it (a run with a recording alongside, tasks.alongside)."""
-    return Path(argv[0]).name in PASS_ON or (argv[:2] == ["sh", "-c"] and bool(re.search(r"\btrap\b.*\bTERM\b", argv[2])))
-
-
 def environment() -> dict[str, str]:
     """The scheduler's environment variables without its own virtual env, which a task must not run in
     (uv run would even take it for the task's)."""
@@ -90,7 +83,7 @@ class Launcher(QObject):
         """Run argv in the project's folder and environment (none: in outdir, in a plain environment)."""
         self._kill_timer.stop()                         # a pending kill was for the previous task
         self._proc, self._cancel, self._grace_s = None, threading.Event(), grace_s
-        self._alone = passes_on(argv)                   # it passes a stop on: signalled alone
+        self._alone = Path(argv[0]).name in PASS_ON     # it passes a stop on: signalled alone
         threading.Thread(target=self._run, args=(argv, Path(outdir), project, self._cancel), daemon=True).start()
 
     def stop(self):

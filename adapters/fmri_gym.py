@@ -44,7 +44,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from model.tasks import SESSION_RIG, Category, Task, alongside
+from model.tasks import SESSION_RIG, Category, Task
 
 TEARDOWN_S = 5.0    # fmri-play's --duration is the block's minus this: time to close before the block ends
 SWITCHES = (("loop", "--loop"), ("resume", "--resume"), ("dummy_trigger", "--dummy-trigger"),
@@ -167,6 +167,7 @@ HEAD_VARS = ('"$SUBJECT"', '"$SES"', '"$RIG"')      # written unquoted, for the 
 MARK = "# scheduler:"
 ASSIGN = re.compile(r"([A-Za-z_]\w*)=(.*)")
 PINNED = re.compile(r"\$\{1:-(\d+)\}")              # SES=${1:-002}
+FUNCTION = re.compile(r"\w+\(\)\s*[({].*")   # a shell function's first line (Recording.function)
 RUNS_FROM = "#RUN"           # between the setup lines and the first run (fmri-gym's editor saves it as "# RUN")
 
 
@@ -197,7 +198,7 @@ class SessionScripts:
         def rig_word(w: str) -> str:                     # the session's rig file: the script's RIG=, as the games'
             root = word(str(self.root))
             return root[:-1] + '/$RIG"' if root.endswith('"') else root + '/"$RIG"'
-        lines = []
+        lines, functions = [], {}
         for i, block in enumerate(session.blocks):
             task = self._task(block.task)
             p, params = {**task.defaults(), **block.params}, dict(block.params)
@@ -208,26 +209,30 @@ class SessionScripts:
                                                                  '"$RIG"' if on_session_rig else f"configs/{p['rig']}",
                                                                  task.time_left(block.duration_ms / 1000))])
                 command = " ".join(w if w in HEAD_VARS else word(w) for w in words)
+            elif isinstance(task, ScriptLine) and recording:      # as typed, one word, as ScriptLine.argv
+                command = (f'env SUBJECT="$SUBJECT" SES="$SES" {"RIG=$RIG" if on_session_rig else word(argv[3])} '
+                           f'sh -c {shlex.quote(params["command"])}')
             elif isinstance(task, ScriptLine):           # as typed, in fmri-gym's folder, by the shell
-                command = params["command"] if recording else params.pop("command")
+                command = params.pop("command")
             else:                                        # what the scheduler runs (Session.commands)
                 command = " ".join(rig_word(w) if on_session_rig and w == session_rig else word(w) for w in argv)
-            if recording:                                # with it, as Session.command: one line, in a subshell
-                command = alongside(command, " ".join(word(w) for w in recording), task.recording.ready,
-                                    word(str(outdir / task.recording.log)))
+            if recording:                                # a call to its function (in the head), as Session.command
+                rec = task.recording
+                functions.setdefault(rec.name, rec.function())
+                command = f"with_{rec.name} {word(str(outdir))} {shlex.quote(' '.join(word(w) for w in recording))} {command}"
             elif isinstance(task, GymTask):              # fmri-gym's own line, which its session editor edits
                 lines.append(command)
                 continue
             if argv[:2] != ["uv", "run"]:                # else uv run --directory: in its folder already
                 command = f"cd {word(str(Path(task.project or outdir).absolute()))} && {command}"
-            line = f"({command})" if recording or argv[:2] != ["uv", "run"] else command
-            line = line if isinstance(task, ScriptLine) and not recording else f"mkdir -p {word(str(outdir))} && {line}"
+            line = f"({command})" if recording or argv[:2] != ["uv", "run"] else command   # ( ): on its own
+            line = line if recording or isinstance(task, ScriptLine) else f"mkdir -p {word(str(outdir))} && {line}"
             mark = {"task": task.key, "duration_s": block.duration_ms / 1000, "parameters": params}
             lines.append(f"{line}  {MARK} {json.dumps(mark)}")
         head = [*HEADER, *(f"{name}={shlex.quote(str(path))}" for name, path in paths.items() if name in used),
                 f"SUBJECT={shlex.quote(session.subject)}", f"RIG={shlex.quote('configs/' + session.rig) if session.rig else ''}",
                 f"SES=${{1:-{session.session_number:03d}}}",
-                RUNS_FROM]
+                *functions.values(), RUNS_FROM]
         return "\n".join(head + lines) + "\n"
 
     # reading
@@ -239,8 +244,11 @@ class SessionScripts:
         """The runs of a script, as a design (what Session.load_design takes), and a note on what was
         left out. Variables it sets ($SUBJECT, $RIG, $RUN_DURATION...) are filled in; its subject and
         session are the scheduler's, not the script's."""
-        values, runs, skipped, folder = {}, [], 0, self.root
+        values, runs, skipped, folder, in_function = {}, [], 0, self.root, False
         for line in (line.strip() for line in text.splitlines()):
+            if in_function or FUNCTION.fullmatch(line):  # a shell function (a recording's): no run; to ")" or "}"
+                in_function = line not in (")", "}")
+                continue
             if not line or line in HEADER or line.startswith(("#!", "set ")) or line.replace(" ", "") == RUNS_FROM:
                 continue
             words = _words(line)

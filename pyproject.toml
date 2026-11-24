@@ -3,8 +3,11 @@ name = "Scheduler"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+    "ipython>=9.18.1",
+    "plotly<7",
     "PySide6>=6.6",
-    "python-statemachine>=3.2"
+    "python-statemachine>=3.2",
+    "svgwrite>=1.4.3",
 ]
 [tool.uv]
 required-version=">=0.13.0"

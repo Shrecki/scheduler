@@ -13,7 +13,8 @@ script writes it. Tasks never run in the scheduler's own environment.
 
 A task can have a recording made alongside each of its runs (an eyetracker's: Recording, given to tasks
 by with_recording): the recording starts first, the task once the recording is ready, and the recording
-stops after it. Both go in one shell line (alongside), which the scheduler runs and a session script writes.
+stops as soon as the task ends. A shell function does it (Recording.function), defined once at the top of
+a session script, each run a call to it; the scheduler runs that same function.
 """
 
 import shlex
@@ -42,11 +43,12 @@ class Category(Enum):                   # each needs a colour in view/theme.py (
 class Recording:
     """A recording made alongside a task's runs (an eyetracker's): started first, in its own project; the
     task starts once the recording's output says it is `ready`, not at all if the recording ended
-    before; after the task, the recording is stopped (SIGTERM: it saves) and its output added to the
-    run's. Its command's placeholders are the task's, plus {task} (the task's key) and {run} (the run
-    the task plays, as its command's --run says; else its n-th run in the session)."""
+    before; as soon as the task ends, the recording is stopped (SIGTERM: it saves). Its command's
+    placeholders are the task's, plus {task} (the task's key) and {run} (the run the task plays, as its
+    command's --run says; else its n-th run in the session)."""
     command: tuple[str, ...]
     ready: str                          # what its output says once it records (or waits for the trigger)
+    name: str = "recording"             # its shell function: with_NAME (function)
     project: Path | str | None = None   # its own project folder, in whose Python environment it runs
     log: str = "recording.log"          # its output, in the run's folder
     startup_s: float = 0                # time it takes to be ready: planned on top of each run, not the task's
@@ -56,6 +58,21 @@ class Recording:
         """Its command line as it runs (in_project), placeholders filled in from `values`."""
         values = {name: Switch(v) if isinstance(v, bool) else v for name, v in values.items()}
         return in_project(self.project, [arg for part in self.command if (arg := part.format(**values))])
+
+    def function(self) -> str:
+        """The shell function that runs a task with this recording: with_NAME DIR 'RECORDER' TASK...,
+        RECORDER the recording's command line as one word, DIR the run's folder. A stop (SIGTERM to the
+        run's processes, or Ctrl+C in a terminal) reaches the task and the recorder; the function then
+        waits for the task, and stops the recorder (EXIT) once the task has ended, however it ends."""
+        return f"""with_{self.name}() (  # DIR 'RECORDER' TASK...: run TASK once RECORDER is armed; stop RECORDER when TASK ends
+  log=$1/{shlex.quote(self.log)}; mkdir -p "$1" && : >"$log" || exit
+  eval "exec $2" >"$log" 2>&1 & rec=$!; shift 2
+  trap 'kill $rec 2>/dev/null; wait $rec' EXIT; trap exit TERM INT
+  until grep -qF {shlex.quote(self.ready)} "$log"; do
+    kill -0 $rec 2>/dev/null || {{ echo "[{self.name}] ended before it was ready:"; cat "$log"; exit 1; }}; sleep 0.2
+  done
+  "$@"
+)"""
 
 
 @dataclass(frozen=True)
@@ -142,23 +159,6 @@ def run_given(argv: list[str]) -> int | None:
             value = value or (argv[i + 1] if i + 1 < len(argv) else "")
             return int(value) if value.isdigit() else None
     return None
-
-
-def alongside(task: str, recording: str, ready: str, log: str) -> str:
-    """One shell line that runs `task` with `recording` alongside (both shell text; `log`, a shell word: the
-    recording's output): the recording in the background; once its output says `ready`, the task (not at
-    all if the recording ended before); then the recording stopped (SIGTERM: it saves) and waited for,
-    its output shown, and the task's exit code passed on.
-    A stop (SIGTERM to the shell, or Ctrl+C in a terminal) goes to the task alone, once (to the recording
-    if the task has not started): the task runs in the background so that the shell can pass it on."""
-    return (f"{recording} > {log} 2>&1 & REC=$! TASK=; "
-            f"trap 'if [ -n \"$TASK\" ]; then kill $TASK; else kill $REC; fi 2>/dev/null' TERM INT; "
-            f"until grep -qF {shlex.quote(ready)} {log} 2>/dev/null || ! kill -0 $REC 2>/dev/null; do sleep 0.2; done; "
-            f"if kill -0 $REC 2>/dev/null; then {task} & TASK=$!; "
-            f"while wait $TASK; CODE=$?; kill -0 $TASK 2>/dev/null; do :; done; kill $REC 2>/dev/null; "
-            f"else echo '[recording] it ended, or the run was stopped, before it was ready: the task did not start'; "
-            f"CODE=1; fi; "
-            f"while kill -0 $REC 2>/dev/null; do wait $REC; done; cat {log}; (exit $CODE)")
 
 
 class Switch:
