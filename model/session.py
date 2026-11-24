@@ -17,7 +17,7 @@ from pathlib import Path
 
 from .task_definitions import DEFAULT_RIG, RIGS, RIGS_DIR, get_task, tasks_for
 from .templates import Template, find_templates
-from .tasks import SESSION_RIG, Category, alongside, run_given
+from .tasks import SESSION_RIG, Category, run_given
 
 MIN = 60_000
 
