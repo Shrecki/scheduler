@@ -48,7 +48,7 @@ COG_TASKS_MRI: list[Task] = with_recording(dbp_fmri_to_task(DBP_FMRI_PATH, Categ
                                              length="MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION"), EYES)
 
 
-COG_TASKS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-retinotopy", "MEG-ARC", "MEG-VCS", "MEG-WCS"],
+COG_TASKS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-Reading-Sentences", "MEG-ARC", "MEG-Intuitive-Physics", "MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-VCS", "MEG-verbal-working-memory", "MEG-visual-search", "MEG-WCS", "MEG-theory-of-mind"],
                                         category=Category.COGNITIVE_TASK_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd"), EYES)
 
 MOVIE_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-movie"],
@@ -57,8 +57,11 @@ MOVIE_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-mo
 COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
 
 
-LOCALIZERS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-button-press", "MEG-left-right", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-Intuitive-Physics", "MEG-Reading-Sentences","MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-verbal-working-memory", "MEG-visual-search","MEG-theory-of-mind", "MEG-movie"],
+LOCALIZERS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-left-right", "MEG-button-press", "MEG-movie"],
                                         category=Category.LOCALIZER_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd"), EYES)
+
+LOCALIZERS_MRI: list[Task] =  with_recording(mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI, rigs=RIGS), EYES)
+
 
 EYETRACKERS: list[Task] = [
     Task("eyetrack_calibration_meg", "EyeTrack Calibration (MEG)", Category.EYETRACKER_CALIBRATION,

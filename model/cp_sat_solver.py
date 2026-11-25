@@ -17,8 +17,8 @@ def orderable(blocks):
     """No task twice in a row is possible iff the commonest task has <= ceil(N/2)."""
     n = sum(blocks.values())
     return n == 0 or max(blocks.values()) <= (n + 1) // 2
-
-
+ 
+ 
 def quick_order(blocks):
     """Any valid order: repeatedly take the commonest task that isn't the last one."""
     left, out = Counter(blocks), []
@@ -27,150 +27,198 @@ def quick_order(blocks):
         out.append(a)
         left[a] -= 1
     return out
-
-
-def place_calibrations(order, dur, calib, every):
-    """Insert 'CAL' blocks; returns (sequence, total minutes)."""
-    seq, t, due = ["CAL"], calib, calib + every
+ 
+ 
+def place_calibrations(order, dur, calib, every, max_calib):
+    """Fallback only: opening 'CAL', then each next one at the nearest block edge to
+    `every` s after the previous ends, at most `max_calib` in total."""
+    seq, t, due, cals = ["CAL"], calib, calib + every, max_calib - 1
     for a in order:
-        if due <= t + dur[a] / 2:          # due point in this block's first half
-            seq.append("CAL")              # (or already passed) -> calibrate before
-            t += calib
+        if cals and due <= t + dur[a] / 2:
+            seq.append("CAL")
+            t, cals = t + calib, cals - 1
             due = t + every
         seq.append(a)
         t += dur[a]
-    return seq, t
-
-
-def best_order(blocks, pairs, firsts, n, rng, time_limit=1.0):
+    return seq
+ 
+ 
+def best_order(blocks, dur, session_budget, task_type, pairs, firsts, n, S, K, rng, pair_min=2, time_limit=2.0):
+    """CP-SAT: order the chosen blocks and place the K-1 non-opening calibrations.
+    Returns the sequence ('CAL' = calibration), or None if no solution was found."""
     names, N = sorted(+blocks), sum(blocks.values())
-    nbar = sum(n.values()) / len(n)
-    if N == 1:
-        return names
+    P, nbar = range(N), sum(n.values()) / len(n)
     m = cp_model.CpModel()
-    z = {(p, a): m.new_bool_var("") for p in range(N) for a in names}
-    cost = []
-    for p in range(N):
+    z = {(p, a): m.new_bool_var("") for p in P for a in names}   # p holds task a
+    e = {p: m.new_bool_var("") for p in P if p}                  # CAL before p (p>0)
+    D = [sum(dur[a] * z[p, a] for a in names) for p in P]        # duration at p
+    L = [m.new_int_var(0, sum(dur[a] * blocks[a] for a in names), "") for p in P]
+    dev = [m.new_int_var(0, 10**6, "") for p in P]
+    primary, variety = [], []
+ 
+    for p in P:                                                  # (H1) one per slot
         m.add_exactly_one(z[p, a] for a in names)
     for a in names:
-        m.add(sum(z[p, a] for p in range(N)) == blocks[a])
-        for p in range(N - 1):
-            m.add_bool_or([~z[p, a], ~z[p + 1, a]])              # no repeat
-        off = m.new_int_var(0, N * N, "")                        # off-centre-ness
-        m.add_abs_equality(off, sum((N - 1 - 2 * p) * z[p, a] for p in range(N)))
-        cost += [10 * off, 10 * firsts[a] * z[0, a]]
-    for p in range(N - 1):
+        m.add(sum(z[p, a] for p in P) == blocks[a])              # (H2) all placed
+        for p in P[:-1]:
+            m.add_bool_or([~z[p, a], ~z[p + 1, a]])              # (H3) no repeat
+    m.add(sum(e.values()) <= K - 1)                              # (H4) CAL budget
+ 
+    m.add(L[0] == D[0])                                          # (d) window length
+    for p in P[1:]:
+        m.add(L[p] == D[p]).only_enforce_if(e[p])
+        m.add(L[p] == L[p - 1] + D[p]).only_enforce_if(~e[p])
+    for p in P[:-1]:                                             # (d) |window - S|
+        m.add(dev[p] >= L[p] - S).only_enforce_if(e[p + 1])      #     when it closes
+        m.add(dev[p] >= S - L[p]).only_enforce_if(e[p + 1])
+    m.add(dev[-1] >= L[-1] - S)                                  # last: only too long
+    primary += dev
+ 
+    for cat in {task_type[a] for a in names} - {Category.VIDEO_GAME}:   # (a)
+        u = [sum(z[p, a] for a in names if task_type[a] == cat) for p in P]
+        for p in P[:-1]:
+            s = m.new_bool_var("")
+            m.add(s >= u[p] + u[p + 1] - 1)
+            primary.append(60 * pair_min * s)
+ 
+    for a in names:                                              # variety
+        off = m.new_int_var(0, N * N, "")                        # centred (ABBA)
+        m.add_abs_equality(off, sum((N - 1 - 2 * p) * z[p, a] for p in P))
+        variety += [10 * off, 10 * firsts[a] * z[0, a]]          # rotate openers
+    for p in P[:-1]:
         for a in names:
             for b in names:
-                # past count relative to chance (big queues meet more often)
-                w = round(10 * pairs[a, b] * nbar ** 2 / (n[a] * n[b]))
+                w = round(10 * pairs[a, b] * nbar ** 2 / (n[a] * n[b]))  # vs chance
                 if a != b and w:
                     t = m.new_bool_var("")
                     m.add_bool_or([~z[p, a], ~z[p + 1, b], t])
-                    cost.append(w * t)
-    cost += [rng.randint(0, 9) * v for v in z.values()]          # variety
-    m.minimize(sum(cost))
+                    variety.append(w * t)
+    variety += [rng.randint(0, 9) * v for v in z.values()]
+ 
+    m.minimize(session_budget * sum(primary) + sum(variety))
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit
     solver.parameters.random_seed = rng.randint(0, 10**6)
     if solver.solve(m) not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        return quick_order(blocks)
-    return [a for p in range(N) for a in names if solver.value(z[p, a])]
-
-
-    
-
+        return None
+    seq = ["CAL"]                                                # (e) opening CAL
+    for p in P:
+        if p and solver.value(e[p]):
+            seq.append("CAL")
+        seq += [a for a in names if solver.value(z[p, a])]
+    return seq
+ 
+ 
 def schedule(tasks_individual_durations: dict[str,int], tasks_repetitions: dict[str,int], tasks_priorities: dict[str, int], task_type: dict[str,Category], n_sessions: int=6, time_budget_per_session: int=105*60, n_calib_per_session: int=5, calib_time_spacing:int=20*60, calib_duration: int=2*60, mandatory_min_repetitions_per_session: dict[str,int]={}, is_mri: bool=False, fmap_duration: int=30, exempt_from_fmap: list[str]|None=None, seed=0):
     """
     Given task and session specifications, design a schedule to best satisfy all constraints.
-    
+ 
     Conceptually, the algorithm maintains queues per each specified task, with associated priorities.
-    While scheduling the Nth session, it chooses tasks to include in the session according to a weighted fair queueing scheme.
-    From the task selections, it then applies a CP-SAT approach, aiming to satisfy the following rules:
-    -
-    - 
-    -
-    If, from the produced schedule, there is still enough time to include more tasks, the algorithm goes back to the queue to add 
-    more blocks, and reruns the CP-SAT.
-
+    Each session reserves time for K = min(floor(T / calib_time_spacing), n_calib_per_session)
+    calibrations (the opening one included), leaving B = T - K * calib_duration for blocks.
+    Block durations include their fieldmap when is_mri.
+    While scheduling the Nth session, it chooses blocks according to a weighted fair queueing scheme:
+    - seed: the mandatory blocks, plus 2 blocks of each of the 2 fairest video games
+    - fill: repeatedly serve the task whose category (task_type), then whose own queue, is furthest
+      behind in time, counting the blocks being added (a new task enters with 2 blocks, a present
+      one gets 1; a new task gets 1 block only when nothing else fits). Once 2 video games are in
+      the session, games lose their priority edge. A block is accepted only if the blocks still
+      fit B and can still be ordered with no task twice in a row.
+    Once the blocks are chosen, CP-SAT orders them and places the K - 1 remaining calibrations:
+    - hard: every block placed exactly once, one block per position (no overlap, no gap)
+    - hard: no task twice in a row (calibrations don't break a repeat)
+    - hard: at most K - 1 calibrations besides the opening one (so the session fits T)
+    - soft: each calibration window (end of one calibration to start of the next) close to
+      calib_time_spacing; the last window only penalised if too long
+    - soft: no two neighbouring blocks of the same category, video games exempt (calibrations
+      don't separate them)
+    - soft, weaker: each task's blocks centred in the session, openers rotated, transitions that
+      were frequent in earlier sessions avoided, a small random term for variety
+    Every session opens with a calibration.
+ 
     Args:
         tasks_individual_durations (dict[str,int]): a dictionary mapping each task to be included to a duration in seconds
         tasks_repetitions (dict[str,int]): a dictionary mapping each task to how many times we want the task repeated over all sessions in total
-        tasks_priorities (dict[str, int]): a dictionary mapping each task to a priority to be chosen (higher number is higher priority)
-        task_type (dict[int, Category]): a dictionary, mapping each task to a task Category type.
+        tasks_priorities (dict[str, int]): a dictionary mapping each task to a priority to be chosen (higher number is higher priority). Only breaks ties in the fair queueing.
+        task_type (dict[str, Category]): a dictionary, mapping each task to a task Category type. Categories are balanced against each other in every session; Category.VIDEO_GAME tasks get the 2-games seed.
         n_sessions (int, optional): Number of sessions to schedule. Defaults to 6.
         time_budget_per_session (int, optional): The desired session length, given in seconds. Defaults to 105*60 seconds.
-        n_calib_per_session (int, optional): Number of eyetracker calibrations per session. Defaults to 5.
-        calib_time_spacing (int, optional): Ideally, the spacing between two eyetracker calibration episodes, in seconds. Defaults to 20*60.
+        n_calib_per_session (int, optional): Maximum number of eyetracker calibrations per session, the opening one included. Defaults to 5.
+        calib_time_spacing (int, optional): Ideally, the time from the end of one eyetracker calibration to the start of the next, in seconds. Defaults to 20*60.
         calib_duration (int, optional): The duration of an eyetracking episode, in seconds. Defaults to 2*60.
-        mandatory_min_repetitions_per_session (dict[str,int], optional): a dictionary, indicating specific tasks where a set minimum number of repetitions for each session is desired. Use it if you want to have e.g. a specific localizer always present in all sessions. The specified min repetition number should therefore be at least as high as the number of repetitions in task_repetitions. Defaults to {}.
+        mandatory_min_repetitions_per_session (dict[str,int], optional): a dictionary, indicating specific tasks where a set minimum number of repetitions for each session is desired. Use it if you want to have e.g. a specific localizer always present in all sessions. The task's total in tasks_repetitions must then be at least this minimum times n_sessions. Defaults to {}.
         is_mri (bool, optional): a boolean indicating whether the modality is MRI or not. If MRI, after every task not exempt from fieldmaps, a fieldmap block is appended. Defaults to False.
         fmap_duration (int, optional): the duration, in seconds, of a single fieldmap block. Defaults to 30.
         exempt_from_fmap (list[str] | None, optional): a list of task keys for which a fieldmap block should NOT BE added. Defaults to None.
         seed (int, optional): Random seed to use. Defaults to 0.
+ 
+    Returns:
+        sessions (list[tuple[list[str], int]]): per session, the sequence ("CAL" = calibration,
+            "fmap" = fieldmap) and its total duration in seconds.
+        remaining (dict[str,int]): blocks left unscheduled after n_sessions, per task.
     """
     rng = random.Random(seed)
     exempt = set(exempt_from_fmap or [])
     has_fmap = lambda a: is_mri and a not in exempt
-    dur = {a: d + fmap_duration * has_fmap(a)             # a block includes its fieldmap
+    dur = {a: d + fmap_duration * has_fmap(a)             # (c) a block includes its fieldmap
            for a, d in tasks_individual_durations.items()}
+    n = dict(tasks_repetitions)
+    prio = tasks_priorities
+    must = mandatory_min_repetitions_per_session
+    T, S, c = time_budget_per_session, calib_time_spacing, calib_duration
+    K = min(T // S, n_calib_per_session)                   # calibrations, opening included
+    B = T - c * K                                          # time left for blocks
     games = [t for t in task_type if task_type[t] == Category.VIDEO_GAME]
-    n, prio, must = tasks_repetitions, tasks_priorities, mandatory_min_repetitions_per_session
-    budget, every, calib = time_budget_per_session, calib_time_spacing, calib_duration
-    top = [a for a in n if prio[a] == max(prio.values())]   # e.g. the video games
-    base = min(prio.values())
+    base = min((prio[a] for a in n if a not in games), default=min(prio.values()))
     for a, k in must.items():
         if n[a] < k * n_sessions:
             raise ValueError(f"{a}: {n[a]} repetitions < {k} per session x {n_sessions} sessions.")
-    est = math.ceil(sum(n[a] * dur[a] for a in n) / (budget - n_calib_per_session * calib))
+    est = math.ceil(sum(n[a] * dur[a] for a in n) / B)
     if est != n_sessions:
         print(f"Note: all repetitions need about {est} sessions; scheduling {n_sessions}.")
-    if len(top) >= 2 and sum(n[a] // 2 for a in top) // 2 < min(est, n_sessions):
-        print("Warning: the top-priority queues can't give 2 tasks x 2 blocks to every session.")
+    if len(games) >= 2 and sum(n[a] // 2 for a in games) // 2 < min(est, n_sessions):
+        print("Warning: the game queues can't give 2 games x 2 blocks to every session.")
     used, pairs, firsts, sessions, warned = Counter(), Counter(), Counter(), [], False
- 
-    def time_of(blocks):
-        if not orderable(blocks):
-            return math.inf
-        return place_calibrations(quick_order(blocks), dur, calib, every, n_calib_per_session)[1]
  
     while len(sessions) < n_sessions and any(used[a] < n[a] for a in n):
         blocks = Counter()
         later = n_sessions - len(sessions) - 1                 # sessions after this one
         left = lambda a: n[a] - used[a] - blocks[a] - must.get(a, 0) * later
+        free = lambda: B - sum(dur[a] * k for a, k in blocks.items())
         fair = lambda pool: sorted((a for a in pool if left(a) >= 2 and a not in must),
                                    key=lambda a: ((used[a] + blocks[a]) / n[a], -prio[a], rng.random()))
  
         def add(delta):
-            if all(left(a) >= k for a, k in delta.items()) \
-                    and time_of(blocks + delta) <= budget:
+            trial = blocks + delta
+            if all(left(a) >= k for a, k in delta.items()) and orderable(trial) \
+                    and sum(dur[a] * k for a, k in trial.items()) <= B:
                 blocks.update(delta)
                 return True
             return False
  
-        # 1. Seed: mandatory blocks + 2 blocks of each of the 2 fairest top-priority
-        #    tasks, added together (a lone pair A A can't be ordered).
-        seeds = fair(top)[:2]
-        if len(top) >= 2 and len(seeds) < 2 and not warned:
-            print(f"Session {len(sessions) + 1}: top-priority tasks ran out, "
-                  "dropping the >= 2 rule.")
+        # 1. Seed: mandatory blocks + 2 blocks of each of the 2 fairest video games,
+        #    added together (a lone pair A A can't be ordered).
+        seeds = fair(games)[:2]
+        if len(games) >= 2 and len(seeds) < 2 and not warned:
+            print(f"Session {len(sessions) + 1}: ran out of games, "
+                  "dropping the >= 2 games rule.")
             warned = True
         seeds += [a for a in fair(n) if a not in seeds][:2 - len(seeds)]
         if not add(Counter(must) + Counter({a: 2 for a in seeds})) and not add(Counter(must)):
             raise ValueError("The mandatory blocks don't fit in one session.")
  
         # 2. Fill by fair queueing: category progress, then own-queue progress, then
-        #    priority (top tasks lose their edge once 2 are in), then chance.
+        #    priority (games lose their edge once 2 are in), then chance.
         step = lambda a: 1 if a in blocks else 2
-        prio_now = lambda a: (base if a in top and sum(b in blocks for b in top) >= 2
+        prio_now = lambda a: (base if a in games and sum(g in blocks for g in games) >= 2
                               else prio[a])
  
-        def cat_frac(a):  # progress of a's priority level after adding its step
-            cat = [b for b in n if prio[b] == prio[a]]
-            done = sum((used[b] + blocks[b]) * dur[b] for b in cat) + step(a) * dur[a]
-            return done / sum(n[b] * dur[b] for b in cat)
+        def cat_frac(a):  # time progress of a's whole category so far (identical for
+            cat = [b for b in n if task_type[b] == task_type[a]]  # tasks of one category,
+            done = sum((used[b] + blocks[b]) * dur[b] for b in cat)  # which then compete
+            return done / sum(n[b] * dur[b] for b in cat)            # on their own queue)
  
-        while budget - time_of(blocks) >= min(dur.values()):
+        while free() >= min(dur.values()):
             cands = sorted((a for a in n if left(a) > 0), key=lambda a: (
                 cat_frac(a), (used[a] + blocks[a] + step(a)) / n[a],
                 -prio_now(a), rng.random()))
@@ -180,13 +228,11 @@ def schedule(tasks_individual_durations: dict[str,int], tasks_repetitions: dict[
         if not blocks:
             raise ValueError("A remaining block is longer than the session budget.")
  
-        # 3. Order with CP-SAT, then place calibrations and fieldmaps.
-        order = best_order(blocks, pairs, firsts, n, rng)
-        seq, total = place_calibrations(order, dur, calib, every, n_calib_per_session)
-        if total > budget:                 # rare: this order needs one extra
-            order = quick_order(blocks)    # calibration; fall back to the order
-            seq, total = place_calibrations(order, dur, calib, every,
-                                            n_calib_per_session)  # checked above
+        # 3. CP-SAT: order + calibrations (fallback: any valid order, nearest-edge CALs).
+        seq = best_order(blocks, dur, time_budget_per_session, task_type, pairs, firsts, n, S, K, rng) \
+            or place_calibrations(quick_order(blocks), dur, c, S, K)
+        order = [a for a in seq if a != "CAL"]
+        total = sum(dur[a] for a in order) + c * seq.count("CAL")
         seq = [x for a in seq for x in ([a, "fmap"] if a in dur and has_fmap(a) else [a])]
         sessions.append((seq, total))
         used += blocks
@@ -403,6 +449,17 @@ if __name__ == "__main__":
     
     # Schedule according to all specs the sessions
     
-    #sessions, remaining = schedule(meg_task_individual_durations, meg_task_n_repetitions, meg_task_priorities,meg_task_types, n_sessions = n_sessions, time_budget_per_session=session_budget, n_calib_per_session=5, calib_time_spacing = 20, mandatory_min_repetitions_per_session={'MEG-eye-movements': 1}, is_mri=False, exempt_from_fmap=[])
+    sessions, remaining = schedule(meg_task_individual_durations, meg_task_n_repetitions, meg_task_priorities,meg_task_types, n_sessions = n_sessions, time_budget_per_session=session_budget, n_calib_per_session=5, calib_time_spacing = 20, mandatory_min_repetitions_per_session={'MEG-eye-movements': 1}, is_mri=False, exempt_from_fmap=[])
     
+    def print_schedule(sessions, durations, calib_duration=120, fmap_duration=30):
+        """One item per line, with its start time (mm:ss) within the session."""
+        length = {"CAL": calib_duration, "fmap": fmap_duration} | durations
+        for k, (seq, total) in enumerate(sessions, 1):
+            print(f"\nSession {k} ({total // 60} min {total % 60:02d} s)")
+            t = 0
+            for item in seq:
+                print(f"  {t // 60:3d}:{t % 60:02d}  {item}")
+                t += length[item]
+
+    print_schedule(sessions, meg_task_individual_durations)    
     # Lastly, represent it as a session schedule (one file per session)
