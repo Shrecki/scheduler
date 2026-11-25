@@ -7,6 +7,16 @@ from adapters.fmri_gym import SessionScripts
 from model import task_definitions as td
 from model.session import Session
 
+from functools import cache
+from PySide6.QtGui import QGuiApplication
+from view.report import write_pdf
+
+@cache
+def qt_app() -> QGuiApplication:
+    """The program's Qt application, which the PDF's fonts need: made once, kept (no display:
+    QT_QPA_PLATFORM=offscreen)."""
+    return QGuiApplication.instance() or QGuiApplication([])
+
 def parse_key(key: str) -> tuple[str, str]:
     """'MEG-left-right -audio' -> ('MEG-left-right', '-audio');  'MEG-movie' -> ('MEG-movie', '')"""
     base, sep, variant = key.partition(" -")
@@ -184,8 +194,9 @@ def print_task_sequence(task_sequence):
             print(f"  {i:2d}. {line}")
  
  
-def export(runs, path, subject="sub-01", ses=1):
-    """Runs (fieldmaps left out) as <path>.json and <path>.sh, as Save design… writes them."""
+def export(runs, path, subject="sub-01", ses=1, total_s=None):
+    """Runs (fieldmaps left out) as <path>.json, <path>.sh and <path>.pdf, as Save design… and
+    Export PDF… write them. `total_s`: the session's recording time (None: its runs' time)."""
     s = Session(processes=None, scripts=SessionScripts(td.FMRI_GYM_PATH, td.TASKS, paths=td.PATHS))
     s.subject, s.session_number = subject, ses
     for run in runs:
@@ -197,8 +208,12 @@ def export(runs, path, subject="sub-01", ses=1):
         block.params.update(run.params)
         if run.duration_s is not None:
             block.duration_ms = int(run.duration_s * 1000)
+    s.total_ms = int(total_s * 1000) if total_s else sum(b.duration_ms for b in s.blocks)
     s.save(path)
-    return s.notice
+    saved = s.notice
+    qt_app()
+    s.save_report(f"{path}.pdf", write_pdf)
+    return f"{saved}; {s.notice}" 
  
  
 def export_task_sequence(task_sequences, folder, subject):
