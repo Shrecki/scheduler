@@ -37,6 +37,7 @@ class Category(Enum):                   # each needs a colour in view/theme.py (
     LOCALIZER_MEG = "MEG localizer"
     LOCALIZER_MRI = "MRI localizer"
     EYETRACKER_CALIBRATION = "Eyetracker calibration"
+    FIELDMAP = "MRI Fieldmap (PA)"
 
 
 @dataclass(frozen=True)

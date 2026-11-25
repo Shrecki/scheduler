@@ -47,6 +47,11 @@ GAME_TASKS = with_recording(gym_to_task(FMRI_GYM_PATH), EYES)
 COG_TASKS_MRI: list[Task] = with_recording(dbp_fmri_to_task(DBP_FMRI_PATH, Category.COGNITIVE_TASK_MRI, startup_s=20, rigs=RIGS,
                                              length="MAX_RUN_DURATION + FINAL_FIXATION + RUN_FEEDBACK_DURATION"), EYES)
 
+COG_TASKS_MRI = COG_TASKS_MRI + [Task("Syllogism", "Syllogism", Category.COGNITIVE_TASK_MRI,
+         ("retinotopy", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}", "--photodiode",
+          "--screen", "{screen}"),
+         {"run": (NEXT, 1, 2, 3, 4), "photodiode": False, "screen": 1},
+         duration_s=420, project=EYETRACKER_PATH)]
 
 COG_TASKS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-Reading-Sentences", "MEG-ARC", "MEG-Intuitive-Physics", "MEG-Mental-Rotation", "MEG-spatial-working-memory", "MEG-VCS", "MEG-verbal-working-memory", "MEG-visual-search", "MEG-WCS", "MEG-theory-of-mind"],
                                         category=Category.COGNITIVE_TASK_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd"), EYES)
@@ -57,11 +62,16 @@ MOVIE_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-mo
 COG_TASKS: list[Task] = COG_TASKS_MRI + COG_TASKS_MEG
 
 
-LOCALIZERS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-left-right", "MEG-button-press", "MEG-movie"],
+LOCALIZERS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["MEG-eye-movements", "MEG-left-right", "MEG-retinotopy", "MEG-motor-localizer", "MEG-localizer", "MEG-localizer2", "MEG-localizer3","Retinotopy-multifocal", "MEG-left-right", "MEG-button-press", "MEG-freeviewing"],
                                         category=Category.LOCALIZER_MEG, duration_s=120, sources=DBP_MEG_PATH / "cmd"), EYES)
 
+LOCALIZERS_MEG = LOCALIZERS_MEG + with_recording(mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MEG, rigs=RIGS), EYES)
 LOCALIZERS_MRI: list[Task] =  with_recording(mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI, rigs=RIGS), EYES)
-
+LOCALIZERS_MRI = LOCALIZERS_MRI + [ Task("Retinotopy", "Retinotopy (MRI)", Category.LOCALIZER_MRI,
+         ("retinotopy", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}", "--photodiode",
+          "--screen", "{screen}"),
+         {"run": (NEXT, 1, 2, 3, 4), "photodiode": False, "screen": 1},
+         duration_s=360, project=EYETRACKER_PATH)]
 
 EYETRACKERS: list[Task] = [
     Task("eyetrack_calibration_meg", "EyeTrack Calibration (MEG)", Category.EYETRACKER_CALIBRATION,
@@ -88,7 +98,9 @@ TASKS_DUMMY: list[Task] = [
          app(*view(ROOT / "assets" / "checkerboard.gif", "--fullscreen")), duration_s=60),
 ]
 
-TASKS = COG_TASKS + LOCALIZERS_MEG + LOCALIZERS_MRI + GAME_TASKS + EYETRACKERS + MOVIE_MEG
+FIELDMAPS: list[Task] = [Task("fieldmap", "Fieldmap", Category.FIELDMAP, "", duration_s=30)]
+
+TASKS = COG_TASKS + LOCALIZERS_MEG + LOCALIZERS_MRI + GAME_TASKS + EYETRACKERS + MOVIE_MEG + FIELDMAPS
 PATHS = {name: value for name, value in dict(globals()).items()             # a session script's variables
          if (name.endswith("_PATH") or name == "DATA_DIR") and isinstance(value, Path)}
 

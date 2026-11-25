@@ -140,6 +140,16 @@ def gv_seconds(path: Path) -> float:
     return frames / fps
 
 
+def ranks(text: str, count: int) -> list[int]:
+    """The ranks a DBP_MEG list picks (MEG-movie's -clips, MEG-freeviewing's -select: numbers and
+    ranges, "1-4,7"), in its order; empty: all `count`."""
+    order = []
+    for item in (text or f"1-{count}").split(","):
+        first, _, last = item.strip().partition("-")
+        order += range(int(first), int(last or first) + 1)
+    return order
+
+
 # --- the programs -------------------------------------------------------------------------------------
 def protocol_localizer(flags: dict, source: Path) -> float:
     """MEG-localizer, MEG-localizer2: the instruction screen and the operator's T (neither with
@@ -217,6 +227,23 @@ def eye_movements(flags: dict, source: Path) -> float:
     return waits * READING_S + sum(0.5 + seconds[name] for name in blocks)
 
 
+def freeviewing(flags: dict, source: Path) -> float:
+    """MEG-freeviewing: the instructions (not with -autostart), the trigger (-wait-trigger); 1 s of
+    fixation, the pictures (-select: their ranks in the folder, "1-20"; empty: all), each
+    -display-time (its fades within it), -isi of fixation between two, then 1 s of fixation. The
+    pictures are the .jpg, .jpeg and .png files of -pictures (a relative path is from the root of the
+    repository, two folders above the source folder): not in the repository, they must have been
+    downloaded on this PC (./get-stimuli.sh MEG-freeviewing)."""
+    folder = source.parent.parent / flags["pictures"]              # an absolute -pictures: itself
+    count = sum(path.suffix.lower() in (".jpg", ".jpeg", ".png") for path in folder.iterdir())
+    if not count:
+        raise FileNotFoundError(f"no pictures in {folder}")
+    n = len(ranks(flags["select"], count))
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
+    return (waits * READING_S + 1 + n * go_duration_s(flags["display-time"])
+            + (n - 1) * go_duration_s(flags["isi"]) + 1)
+
+
 def intuitive_physics(flags: dict, source: Path) -> float:
     """MEG-Intuitive-Physics: the instructions (not with -autostart), the trigger (-wait-trigger); a
     1 s fixation, then -n movies each shown once in each condition, in blocks of -block-size trials,
@@ -266,10 +293,7 @@ def movie(flags: dict, source: Path) -> float:
     have been converted on this PC."""
     names = (["training_01_romance", "training_02_romance", "training_03_romance"] if flags["practice"]
              else [f"romance_{k:02d}" for k in range(1, 9)])
-    order = []
-    for item in (flags["clips"] or f"1-{len(names)}").split(","):
-        first, _, last = item.strip().partition("-")
-        order += range(int(first), int(last or first) + 1)
+    order = ranks(flags["clips"], len(names))
     folder = Path(flags["movies"])
     if not folder.is_absolute():
         folder = source.parent.parent / folder
@@ -345,8 +369,9 @@ def vcs(flags: dict, source: Path) -> float:
 
 
 LENGTHS = {
-    "MEG-ARC": meg_arc,
+    "MEG-ARC":  meg_arc,
     "MEG-eye-movements": eye_movements,
+    "MEG-freeviewing": lambda lags,source : 550,#freeviewing,
     "MEG-Intuitive-Physics": intuitive_physics,
     "MEG-left-right": left_right,
     "MEG-Mental-Rotation": mental_rotation,
