@@ -18,7 +18,7 @@ from adapters.fmri_gym import gym_to_task, rig_names
 from adapters.dbp_mtb import mtb_to_task
 from adapters.dbp_fmri import dbp_fmri_to_task
 from adapters.dbp_meg import go_to_task
-from .tasks import ROOT, SESSION_RIG, Category, Recording, Task, app, view, with_recording, NEXT
+from .tasks import ROOT, SESSION_RIG, Category, Recording, Task, app, uv, view, with_recording, NEXT
 
 FMRI_GYM_PATH = Path("~/DBP/fmri-gym").expanduser()   # change to yours
 DBP_MTB_PATH = Path("~/DBP/dbp_mtb").expanduser()
@@ -34,10 +34,11 @@ RIG = (SESSION_RIG, *RIGS)
 DEFAULT_RIG = "examples/rigs/laptop.json"           # change to yours
 
 RECORD_EYES = True
-EYES = Recording(("python", "eyetrack_record.py", "--run-simultaneous", "--subject", "{subject}", "--session", "{ses}",
-                  "--run", "{run}", "--task", "{task}", "--directory", f"{DATA_DIR}/{{subject}}/ses-{{ses}}"),
-                 ready="Waiting for the trigger", name="recording", project=EYETRACKER_PATH, log="eyetracker.log",
-                 startup_s=10, stop_grace_s=10) if RECORD_EYES else None             # change to yours
+EYES = Recording(("python", "eyetrack_record.py", "--run-simultaneous"), ready="Waiting for the trigger",
+                 args=("--subject", "{subject}", "--session", "{ses}", "--run", "{run}", "--task", "{task}",
+                       "--directory", f"{DATA_DIR}/{{subject}}/ses-{{ses}}"),
+                 name="recording", project=EYETRACKER_PATH, log="eyetracker.log",
+                 startup_s=10, stop_grace_s=10) if RECORD_EYES else None
 
 # Every game of the fmri-gym checkout: one task per game family, its levels and curricula as choices.
 GAME_TASKS = with_recording(gym_to_task(FMRI_GYM_PATH), EYES)
@@ -74,16 +75,16 @@ LOCALIZERS_MRI = LOCALIZERS_MRI + [ Task("Retinotopy", "Retinotopy (MRI)", Categ
          duration_s=360, project=EYETRACKER_PATH)]
 
 EYETRACKERS: list[Task] = [
-    Task("eyetrack_calibration_meg", "EyeTrack Calibration (MEG)", Category.EYETRACKER_CALIBRATION,
-         ("eyetrack_calibration", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}", "--photodiode",
-          "--screen", "{screen}"),
+     Task("eyetrack_calibration_meg", "EyeTrack Calibration (MEG)", Category.EYETRACKER_CALIBRATION,
+         uv(EYETRACKER_PATH, "python", "eyetrack_calibration.py", "--subject", "{subject}", "--session", "{ses:02d}",
+            "--run", "{run:02d}", "--photodiode", "--screen", "{screen}"),
          {"run": (NEXT, 1, 2, 3, 4), "photodiode": True, "screen": 1},
-         duration_s=120, project=EYETRACKER_PATH),
-    Task("eyetrack_calibration_meg_mri", "EyeTrack Calibration (MRI)", Category.EYETRACKER_CALIBRATION,
-             ("eyetrack_calibration", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}",
-              "--screen", "{screen}"),
-             {"run": (NEXT, 1, 2, 3, 4), "photodiode": False, "screen": 1},
-             duration_s=120, project=EYETRACKER_PATH),
+         duration_s=120),
+     Task("eyetrack_calibration_mri", "EyeTrack Calibration (MRI)", Category.EYETRACKER_CALIBRATION,
+         uv(EYETRACKER_PATH, "python", "eyetrack_calibration.py", "--subject", "{subject}", "--session", "{ses:02d}",
+            "--run", "{run:02d}", "--photodiode", "--screen", "{screen}"),
+         {"run": (NEXT, 1, 2, 3, 4), "photodiode": False, "screen": 1},
+         duration_s=120),
 ]
 
 TASKS_DUMMY: list[Task] = [

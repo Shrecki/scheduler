@@ -10,12 +10,13 @@ tasks_mri = [t for t in TASKS if t.category in [Category.COGNITIVE_TASK_MRI, Cat
 tasks_meg_dict = {t.label: t for t in tasks_meg}
 tasks_mri_dict = {t.label: t for t in tasks_mri}
 
+print(tasks_meg_dict)
+
 
 # Here define tasks of interest
 retained_meg_tasks = ['AI GameStore', 'Baba Is Auto', 'Rush Hour', 'MEG-left-right', 'MEG-button-press', 'MEG-theory-of-mind', 'MEG-visual-search', 'MEG-verbal-working-memory', 'MEG-Reading-Sentences', 'MEG-eye-movements', 'MEG-Mental-Rotation', 'MEG-Intuitive-Physics', 'MEG-movie', 'MEG-ARC', 'MEG-VCS', 'MEG-WCS','MEG-retinotopy', 'EyeTrack Calibration (MEG)', 'Multi-Task Battery: set_a', 'MEG-freeviewing']
+retained_mri_tasks = ['ARC', 'VCST', 'WCST', 'Multi-Task Battery: set_a', 'Retinotopy (MRI)', 'AI GameStore','Baba Is Auto', 'Rush Hour', 'EyeTrack Calibration (MRI)', 'Syllogism']
 
-retained_mri_tasks = [['ARC', 'VCST', 'WCST', 'Multi-Task Battery: set_a', 'Retinotopy (MRI)', 'AI GameStore','Baba Is Auto', 'Rush Hour', 'EyeTrack Calibration (MRI)']
-]
 
 # Specify here the levels/curricula of interest so we can get them all later for scheduling purposes!
 retained_levels: dict[str, list[str]] = {
@@ -35,12 +36,10 @@ task_options_mri: dict[str,list[str]] = {}
 games_allowed_durations: dict[str, int] = {
     'AI GameStore': 600, # Time is measured in seconds here
     'Rush Hour': 600,
-    'Baba Is Auto': 900
+    'Baba Is Auto': 600,
 }
 
 
-retained_mri_tasks = [['ARC', 'VCST', 'WCST', 'Multi-Task Battery: set_a', 'Retinotopy (MRI)', 'AI GameStore','Baba Is Auto', 'Rush Hour', 'EyeTrack Calibration (MRI)', 'Syllogism']
-]
 
 
 # Specify how many repetitions of each game/task is desired
@@ -50,7 +49,7 @@ mri_task_n_repetitions : dict[str, int] = {
     'AI GameStore -game4': 3,
     'AI GameStore -game7': 3,
     'AI GameStore -game8': 3,
-    'Baba Is Auto -all': 6,
+    'Baba Is Auto -all': 9,
     'Rush Hour -all': 9,
 
     # Localizers

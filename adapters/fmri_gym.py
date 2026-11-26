@@ -218,8 +218,8 @@ class SessionScripts:
                 command = " ".join(rig_word(w) if on_session_rig and w == session_rig else word(w) for w in argv)
             if recording:                                # a call to its function (in the head), as Session.command
                 rec = task.recording
-                functions.setdefault(rec.name, rec.function())
-                command = f"with_{rec.name} {word(str(outdir))} {shlex.quote(' '.join(word(w) for w in recording))} {command}"
+                functions.setdefault(rec.name, rec.function(word))
+                command = f"with_{rec.name} {word(str(outdir))} {' '.join(map(word, recording))} -- {command}"
             elif isinstance(task, GymTask):              # fmri-gym's own line, which its session editor edits
                 lines.append(command)
                 continue

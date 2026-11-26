@@ -17,6 +17,7 @@ stops as soon as the task ends. A shell function does it (Recording.function), d
 a session script, each run a call to it; the scheduler runs that same function.
 """
 
+import re
 import shlex
 import sys
 from dataclasses import dataclass, field, replace
@@ -44,11 +45,13 @@ class Category(Enum):                   # each needs a colour in view/theme.py (
 class Recording:
     """A recording made alongside a task's runs (an eyetracker's): started first, in its own project; the
     task starts once the recording's output says it is `ready`, not at all if the recording ended
-    before; as soon as the task ends, the recording is stopped (SIGTERM: it saves). Its command's
-    placeholders are the task's, plus {task} (the task's key) and {run} (the run the task plays, as its
-    command's --run says; else its n-th run in the session)."""
-    command: tuple[str, ...]
+    before; as soon as the task ends, the recording is stopped (SIGTERM: it saves). Its `command` is the
+    same for every run, written once, in its shell function; each run gives it `args`, whose
+    placeholders are the task's, plus {task} (the task's key as a BIDS label: bids_label) and {run} (the
+    run the task plays, as its command's --run says; else its n-th run in the session)."""
+    command: tuple[str, ...]            # the recorder, the same for every run (in its function)
     ready: str                          # what its output says once it records (or waits for the trigger)
+    args: tuple[str, ...] = ()          # what each run tells it, after `command` (argv)
     name: str = "recording"             # its shell function: with_NAME (function)
     project: Path | str | None = None   # its own folder, where it runs, in the environment uv finds there
     log: str = "recording.log"          # its output, in the run's folder
@@ -56,22 +59,27 @@ class Recording:
     stop_grace_s: float = 5.0           # time it may take to save, on top of the task's stop_grace_s
 
     def argv(self, values: dict) -> list[str]:
-        """Its command line as it runs, placeholders filled in from `values`: given a project, always by uv
-        in it, whatever environment uv finds for it there (uv run --directory PROJECT --no-sync: nothing
-        installed); a wrong folder then fails loudly, instead of running the command outside it."""
+        """One run's `args`, placeholders filled in from `values`."""
         values = {name: Switch(v) if isinstance(v, bool) else v for name, v in values.items()}
-        argv = [arg for part in self.command if (arg := part.format(**values))]
-        project = Path(self.project).expanduser() if self.project else None
-        return ["uv", "run", "--directory", str(project), "--no-sync", *argv] if project else argv
+        return [arg for part in self.args if (arg := part.format(**values))]
 
-    def function(self) -> str:
-        """The shell function that runs a task with this recording: with_NAME DIR 'RECORDER' TASK...,
-        RECORDER the recording's command line as one word, DIR the run's folder. A stop (SIGTERM to the
-        run's processes, or Ctrl+C in a terminal) reaches the task and the recorder; the function then
-        waits for the task, and stops the recorder (EXIT) once the task has ended, however it ends."""
-        return f"""with_{self.name}() (  # DIR 'RECORDER' TASK...: run TASK once RECORDER is armed; stop RECORDER when TASK ends
-  log=$1/{shlex.quote(self.log)}; mkdir -p "$1" && : >"$log" || exit
-  eval "exec $2" >"$log" 2>&1 & rec=$!; shift 2
+    def recorder(self) -> list[str]:
+        """Its command as it runs: given a project, always by uv in it, whatever environment uv finds for it
+        there (uv run --directory PROJECT --no-sync: nothing installed); a wrong folder then fails loudly,
+        instead of running the command outside it."""
+        return list(uv(self.project, *self.command)) if self.project else list(self.command)
+
+    def function(self, word=shlex.quote) -> str:
+        """The shell function that runs a task with this recording: with_NAME DIR ARG... -- TASK..., DIR
+        the run's folder (the recorder's output there: `log`), ARG... the run's arguments to the recorder
+        (argv). `word` writes the recorder's words (a session script: its folders as its variables). A stop
+        (SIGTERM to the run's processes, or Ctrl+C in a terminal) reaches the task and the recorder; the
+        function then waits for the task, and stops the recorder (EXIT) once the task has ended."""
+        return f"""with_{self.name}() (  # DIR ARG... -- TASK...: run TASK once the recorder (given ARG...) is armed; stop it when TASK ends
+  log=$1/{shlex.quote(self.log)}; mkdir -p "$1" && : >"$log" || exit; shift
+  (k=; for a; do shift; [ "$a" = -- ] && k=1; [ "$k" ] || set -- "$@" "$a"; done   # ARG... only
+   exec {" ".join(map(word, self.recorder()))} "$@") >"$log" 2>&1 & rec=$!
+  for a; do shift; [ "$a" = -- ] && break; done                                      # TASK... only
   trap 'kill $rec 2>/dev/null; wait $rec' EXIT; trap exit TERM INT
   until grep -qF {shlex.quote(self.ready)} "$log"; do
     kill -0 $rec 2>/dev/null || {{ echo "[{self.name}] ended before it was ready:"; cat "$log"; exit 1; }}; sleep 0.2
@@ -175,6 +183,19 @@ class Switch:
     def __format__(self, flag: str) -> str:
         return (flag if self.on else "") if flag else str(self.on)
 
+
+def bids_label(key: str) -> str:
+    """`key` as a BIDS label (letters and digits only), in camelCase: "meg_eye_movements" -> "megEyeMovements"."""
+    first, *rest = [word for word in re.split(r"[^A-Za-z0-9]+", key) if word] or [""]
+    return first + "".join(word[0].upper() + word[1:] for word in rest)
+
+
+def uv(project: Path | str, *command: str) -> tuple[str, ...]:
+    """A command run by uv in `project`'s folder, in whatever environment uv finds for it there (no sync:
+    nothing installed). Always, unlike a task's `project` (uv only if it sees PROJECT/.venv): for a
+    program that exists only in that environment ("python", "eyetrack_calibration.py"); a wrong folder
+    then fails loudly, instead of the command running outside it. Not with `project` as well."""
+    return ("uv", "run", "--directory", str(Path(project).expanduser()), "--no-sync", *command)
 
 # --- helpers for writing commands ----------------------------------------------------------------
 def app(*command: str) -> tuple[str, ...]:

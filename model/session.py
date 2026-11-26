@@ -8,7 +8,6 @@ import itertools
 import json
 from collections import Counter
 import random
-import shlex
 import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
@@ -17,7 +16,7 @@ from pathlib import Path
 
 from .task_definitions import DEFAULT_RIG, RIGS, RIGS_DIR, get_task, tasks_for
 from .templates import Template, find_templates
-from .tasks import SESSION_RIG, Category, run_given
+from .tasks import SESSION_RIG, Category, bids_label, run_given
 
 MIN = 60_000
 
@@ -311,18 +310,18 @@ class Session:
     # --- actions, called by the state machine --------------------------------------------------------
     def command(self, index: int) -> tuple[list[str], Path]:
         """What run `index` executes, run in its project's folder (else in the output folder): its command
-        line, and its output folder. With a recording alongside (Task.recording), the task's and the
-        recording's in one shell line (tasks.alongside), as a session script writes it: sh -c "..."."""
+        line, and its output folder. With a recording alongside (Task.recording): its shell function
+        (Recording.function), called as a session script calls it, with_NAME DIR ARG... -- TASK...."""
         argv, recording, outdir = self.commands(index)
         if recording is None:
             return argv, outdir
-        task = get_task(self.blocks[index].task)
-        return ["sh", "-c", alongside(shlex.join(argv), shlex.join(recording), task.recording.ready,
-                                      shlex.quote(str(outdir / task.recording.log)))], outdir
+        rec = get_task(self.blocks[index].task).recording
+        return ["sh", "-c", f'{rec.function()}\nwith_{rec.name} "$@"', f"with_{rec.name}",
+                str(outdir), *recording, "--", *argv], outdir
 
     def commands(self, index: int) -> tuple[list[str], list[str] | None, Path]:
         """Run `index`'s task command line (in its project's Python environment: Task.in_project), its
-        recording's (None: it has none), and its output folder."""
+        arguments to its recording (None: it has none), and its output folder."""
         block, task = self.blocks[index], get_task(self.blocks[index].task)
         again = f"_{n}" if (n := self.times_played(index)) > 1 else ""         # a run played again: its own folder
         outdir = (self.session_dir / "blocks" / f"{index + 1:02d}_{task.key}{again}").absolute()  # tasks run elsewhere
@@ -337,7 +336,7 @@ class Session:
         if task.recording is None:
             return task.in_project(argv), None, outdir
         run = run_given(argv) or 1 + sum(b.task == task.key for b in before)     # the task's run, else its n-th
-        return (task.in_project(argv), task.recording.argv({**params, **context, "task": task.key, "run": run}),
+        return (task.in_project(argv), task.recording.argv({**params, **context, "task": bids_label(task.key), "run": run}),
                 outdir)
 
     def queue(self, index: int):
