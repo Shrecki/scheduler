@@ -14,7 +14,8 @@ print(tasks_meg_dict)
 
 
 # Here define tasks of interest
-retained_meg_tasks = ['AI GameStore', 'Baba Is Auto', 'Rush Hour', 'MEG-left-right', 'MEG-button-press', 'MEG-theory-of-mind', 'MEG-visual-search', 'MEG-verbal-working-memory', 'MEG-Reading-Sentences', 'MEG-eye-movements', 'MEG-Mental-Rotation', 'MEG-Intuitive-Physics', 'MEG-movie', 'MEG-ARC', 'MEG-VCS', 'MEG-WCS','MEG-retinotopy', 'EyeTrack Calibration (MEG)', 'Multi-Task Battery: set_a', 'MEG-freeviewing']
+retained_meg_tasks = ['AI GameStore', 'Baba Is Auto', 'Rush Hour', 'MEG-left-right', 'MEG-button-press', 'MEG-theory-of-mind', 'MEG-visual-search', 'MEG-verbal-working-memory', 'MEG-Reading-Sentences', 'MEG-eye-movements', 'MEG-Mental-Rotation', 'MEG-Intuitive-Physics', 'MEG-movie', 'MEG-ARC', 'MEG-VCS', 'MEG-WCS','MEG-retinotopy', 'EyeTrack Calibration (MEG)', 'Multi-Task Battery: set_a_meg', 'MEG-freeviewing']
+
 retained_mri_tasks = ['ARC', 'VCST', 'WCST', 'Multi-Task Battery: set_a', 'Retinotopy (MRI)', 'AI GameStore','Baba Is Auto', 'Rush Hour', 'EyeTrack Calibration (MRI)', 'Syllogism']
 
 
@@ -91,14 +92,14 @@ meg_task_n_repetitions : dict[str, int] = {
     'AI GameStore -game4': 3,
     'AI GameStore -game7': 3,
     'AI GameStore -game8': 3,
-    'Baba Is Auto -all': 6,
+    'Baba Is Auto -all': 9,
     'Rush Hour -all': 9,
 
     # Localizers
     'MEG-left-right -(defaults)': 0,
     'MEG-left-right -audio': 0,#8,
     'MEG-button-press': 6,
-    'Multi-Task Battery: set_a': 6,
+    'Multi-Task Battery: set_a_meg': 6,
     'MEG-freeviewing': 4,
     #'MEG-theory-of-mind': 1,
     #'MEG-visual-search': 1,
@@ -140,7 +141,7 @@ meg_task_priorities : dict[str, int] = {
     #'MEG-Mental-Rotation': 1,
     #'MEG-Intuitive-Physics': 1,
     #'MEG-movie': 1,
-    'Multi-Task Battery: set_a': 1,
+    'Multi-Task Battery: set_a_meg': 1,
 
     # Tasks
     'MEG-ARC': 1,
