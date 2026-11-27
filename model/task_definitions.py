@@ -19,7 +19,9 @@ from adapters.dbp_mtb import mtb_to_task
 from adapters.dbp_fmri import dbp_fmri_to_task
 from adapters.dbp_meg import go_to_task
 from .tasks import ROOT, SESSION_RIG, Category, Recording, Task, app, uv, view, with_recording, NEXT
+from adapters.retinotopy_mri import retinotopy_to_task
 
+RETINOTOPY_PATH = Path("~/DBP/DBP-hcp-7T-retinotopy-mapping-Psychopy").expanduser()   # change to yours
 FMRI_GYM_PATH = Path("~/DBP/fmri-gym").expanduser()   # change to yours
 DBP_MTB_PATH = Path("~/DBP/dbp_mtb").expanduser()
 DBP_FMRI_PATH = Path("~/DBP/dbp_mri").expanduser()
@@ -68,11 +70,8 @@ LOCALIZERS_MEG: list[Task] = with_recording(go_to_task(DBP_MEG_PATH / "bin", ["M
 
 LOCALIZERS_MEG = LOCALIZERS_MEG + with_recording(mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MEG, rigs=RIGS), EYES)
 LOCALIZERS_MRI: list[Task] =  with_recording(mtb_to_task(DBP_MTB_PATH, category=Category.LOCALIZER_MRI, rigs=RIGS), EYES)
-LOCALIZERS_MRI = LOCALIZERS_MRI + [ Task("Retinotopy", "Retinotopy (MRI)", Category.LOCALIZER_MRI,
-         ("retinotopy", "--subject", "{subject}", "--session", "{ses:02d}", "--run", "{run:02d}", "--photodiode",
-          "--screen", "{screen}"),
-         {"run": (NEXT, 1, 2, 3, 4), "photodiode": False, "screen": 1},
-         duration_s=360, project=EYETRACKER_PATH)]
+LOCALIZERS_MRI = LOCALIZERS_MRI + with_recording(retinotopy_to_task(RETINOTOPY_PATH, Category.LOCALIZER_MRI, startup_s=20, rigs=RIGS), EYES)
+
 
 EYETRACKERS: list[Task] = [
      Task("eyetrack_calibration_meg", "EyeTrack Calibration (MEG)", Category.EYETRACKER_CALIBRATION,

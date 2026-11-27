@@ -170,20 +170,27 @@ def flash_localizer(flags: dict, source: Path) -> float:
 
 
 def meg_arc(flags: dict, source: Path) -> float:
-    """MEG-ARC, its longest run file (a row: a trial; -n: only the first n): per trial two training
-    screens until the done key (answer_s of -train), the test screen until the answer (answer_s of
-    -max-rt) and the feedback (-fb), and the run file's four jitters (s); the lead-in, lead-out and
-    run score (-run-fb, 0: none); the instructions (not with -autostart), the trigger (-wait-trigger)."""
+    """MEG-ARC, its longest run file (a row: a trial; -n: only the first n). Per trial: two training
+    screens until the done button (answer_s of -train), each followed by the run file's fixation
+    (jitter1, jitter2, s); the test screen until the answer (answer_s of -max-rt), kept up after it
+    (-hold-min to -hold-max, their average), the run file's fixation (jitter3) and the feedback (-fb);
+    the fixation between trials (-iti-min to -iti-max, their average: the program draws it, the run
+    file's iti_jitter is not used). Then the lead-in and lead-out, the run's score (-run-fb, with
+    -show-performance). Before the run: the instructions, then the button check (each of the three
+    buttons pressed once, READING_S, then 2 s; -button-check), neither with -autostart; the trigger
+    (-wait-trigger)."""
     def run_s(trials: list[dict]) -> float:
         trials = trials[:flags["n"]] if flags["n"] else trials
-        ms = flags["lead-in"] + len(trials) * flags["fb"] + flags["lead-out"] + flags["run-fb"]
-        jitters = sum(float(t[c]) for t in trials for c in ("jitter1", "jitter2", "jitter3", "iti_jitter"))
+        trial_ms = mean_ms(flags, "hold-min", "hold-max") + flags["fb"] + mean_ms(flags, "iti-min", "iti-max")
+        ms = flags["lead-in"] + len(trials) * trial_ms + flags["lead-out"] + flags["show-performance"] * flags["run-fb"]
+        jitters = sum(float(t[c]) for t in trials for c in ("jitter1", "jitter2", "jitter3"))
         return ms / 1000 + len(trials) * (2 * answer_s(flags["train"]) + answer_s(flags["max-rt"])) + jitters
     files = run_files(source)
     if not files:
         raise FileNotFoundError(f"no run files in {source}")
+    check_s = 0 if flags["autostart"] or not flags["button-check"] else READING_S + 2
     waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
-    return waits * READING_S + max(run_s(rows(path)) for path in files.values())
+    return waits * READING_S + check_s + max(run_s(rows(path)) for path in files.values())
 
 
 def reading_sentences(flags: dict, source: Path) -> float:
@@ -352,26 +359,33 @@ def wcst(flags: dict, source: Path) -> float:
 
 
 def vcs(flags: dict, source: Path) -> float:
-    """MEG-VCS, its longest run file (a row: a trial; -n: only the first n): per trial the cards until
-    the answer (answer_s of -max-rt), the run file's fixation (jitter, s), the feedback (-fb) and the
-    run file's fixation between trials (iti_jitter, s); the lead-in, lead-out and run score (-run-fb,
-    0: none); the instructions (not with -autostart), the trigger (-wait-trigger)."""
+    """MEG-VCS: the instructions (not with -autostart), the trigger (-wait-trigger); the run, then its
+    score (-run-fb, 0: none). With a time limit (-run-duration, by default 7 min), the run lasts just
+    that: no trial starts that would not end in time, and the last fixation lasts until the limit.
+    Without (-run-duration 0): its longest run file (a row: a trial; -n: only the first n), per trial
+    the cards until the answer (answer_s of -max-rt), kept up after it (-hold-min to -hold-max, their
+    average), the run file's fixation (jitter, s), the feedback (-fb) and the fixation between trials
+    (-iti-min to -iti-max, their average: the program draws it); the lead-in and the lead-out."""
+    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
+    score_s = flags["run-fb"] / 1000
+    if flags["run-duration"]:
+        return waits * READING_S + flags["run-duration"] / 1000 + score_s
+
     def run_s(trials: list[dict]) -> float:
         trials = trials[:flags["n"]] if flags["n"] else trials
-        ms = flags["lead-in"] + len(trials) * flags["fb"] + flags["lead-out"] + flags["run-fb"]
-        jitters = sum(float(t[c]) for t in trials for c in ("jitter", "iti_jitter"))
-        return ms / 1000 + len(trials) * answer_s(flags["max-rt"]) + jitters
+        trial_ms = mean_ms(flags, "hold-min", "hold-max") + flags["fb"] + mean_ms(flags, "iti-min", "iti-max")
+        ms = flags["lead-in"] + len(trials) * trial_ms + flags["lead-out"]
+        return ms / 1000 + len(trials) * answer_s(flags["max-rt"]) + sum(float(t["jitter"]) for t in trials)
     files = run_files(source)
     if not files:
         raise FileNotFoundError(f"no run files in {source}")
-    waits = (0 if flags["autostart"] else 1) + flags["wait-trigger"]
-    return waits * READING_S + max(run_s(rows(path)) for path in files.values())
+    return waits * READING_S + max(run_s(rows(path)) for path in files.values()) + score_s
 
 
 LENGTHS = {
-    "MEG-ARC":  meg_arc,
+    "MEG-ARC": meg_arc,
     "MEG-eye-movements": eye_movements,
-    "MEG-freeviewing": lambda lags,source : 550,#freeviewing,
+    "MEG-freeviewing": freeviewing,
     "MEG-Intuitive-Physics": intuitive_physics,
     "MEG-left-right": left_right,
     "MEG-Mental-Rotation": mental_rotation,
